@@ -1,9 +1,10 @@
 import DashboardCard from '../components/DashboardCard'
 import { Plus, Folder, DownloadSimple, WarningCircle, X } from 'phosphor-react'
-import type { ModProject } from '../types'
+import type { ModProject } from '../types/types'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useModStore } from '../store/useModStore'
+import ModImporter from '../components/ModImporter'
 
 export default function Dashboard() {
   const navigate = useNavigate()
@@ -28,9 +29,15 @@ export default function Dashboard() {
     setToast({ message: 'Opening existing mods is not available yet.', type: 'error' })
   }
 
-  const handleImportMod = () => {
-    setToast({ message: 'Mod import is not supported yet.', type: 'error' })
-  }
+
+
+  const handleImportComplete = (importedProject: ModProject) => {
+  // 1. Save the newly imported project directly into your Zustand store state
+  setProject(importedProject) 
+  
+  // 2. Send the browser over to the workspace overview editor screen for this specific project ID
+  navigate(`/project/${importedProject.id}`) 
+}
 
   const handleOpenProject = (project: ModProject) => {
     setProject(project)
@@ -68,14 +75,21 @@ export default function Dashboard() {
             onClick={handleOpenMod}
           />
 
-          <DashboardCard
-            icon={<DownloadSimple size={24} weight="bold" className="text-gray-400" />}
-            text="Import Mod"
-            description="Import an existing mod package"
-            onClick={handleImportMod}
-          />
+          {/* Muted placeholder card because the dropzone below replaces its functional intent */}
+        <DashboardCard
+          icon={<DownloadSimple size={24} weight="bold" className="text-gray-500" />}
+          text="Cloud Sync"
+          description="Feature coming soon"
+          onClick={() => alert("Coming soon!")}
+        />
         </div>
       </section>
+
+      {/* NEW: Dedicated Ingest Zone Section */}
+    <section className="flex flex-col gap-4">
+      <h2 className="text-lg font-semibold tracking-tight text-gray-300 m-0">Import External Mod Package</h2>
+      <ModImporter onImportComplete={handleImportComplete} />
+    </section>
 
       {/* Recent Projects List */}
       <section className="flex flex-col gap-4">

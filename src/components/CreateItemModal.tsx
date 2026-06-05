@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useModStore } from '../store/useModStore'
-import type { Item } from '../types'
+import type { Item } from '../types/types'
 import { X } from 'phosphor-react'
 
 interface Props {

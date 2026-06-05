@@ -1,5 +1,5 @@
 import { Square, CheckSquare } from 'phosphor-react'
-import type { Item } from '../types'
+import type { Item } from '../types/types'
 
 interface ItemEditorPanelProps {
   item: Item | undefined

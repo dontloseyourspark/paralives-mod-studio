@@ -1,6 +1,6 @@
 import { useModStore } from '../store/useModStore'
 import { PencilSimple, Trash, Plus } from 'phosphor-react'
-import type { Item } from '../types'
+import type { Item } from '../types/types'
 
 interface ItemEditorProps {
   hideCreateButton?: boolean

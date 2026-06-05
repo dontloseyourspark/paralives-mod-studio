@@ -1,5 +1,5 @@
 import { Plus, Trash } from 'phosphor-react'
-import type { Item } from '../types'
+import type { Item } from '../types/types'
 
 interface ItemsPanelProps {
   items: Item[]

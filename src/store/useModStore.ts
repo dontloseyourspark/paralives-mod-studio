@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { subscribeWithSelector } from 'zustand/middleware'
-import type { ModProject, Item } from '../types'
+import type { ModProject, Item } from '../types/types'
 
 interface ModStore {
   currentProject: ModProject | null
