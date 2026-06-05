@@ -15,6 +15,7 @@ interface ModStore {
   ) => void
 
   addItem: () => void
+  addItemWith: (payload: Partial<Item>) => void
 
   saveProject: () => void
 
@@ -96,6 +97,30 @@ export const useModStore = create<ModStore>((set, get) => {
           },
         }
       }),
+
+      addItemWith: (payload: Partial<Item>) =>
+        set((state) => {
+          if (!state.currentProject) return state
+
+          const newItem: Item = {
+            id: crypto.randomUUID(),
+            name: payload.name || 'New Item',
+            description: payload.description || '',
+            price: typeof payload.price === 'number' ? payload.price : 0,
+            tags: payload.tags || [],
+            category: payload.category,
+            thumbnail: payload.thumbnail,
+            translations: payload.translations,
+          }
+
+          return {
+            currentProject: {
+              ...state.currentProject,
+              items: [...state.currentProject.items, newItem],
+              updatedAt: new Date().toISOString(),
+            },
+          }
+        }),
 
       updateItem: (id: string, updates: Partial<Item>) =>
         set((state) => {

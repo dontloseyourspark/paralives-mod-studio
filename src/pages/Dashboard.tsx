@@ -1,8 +1,9 @@
-import { useNavigate } from 'react-router-dom'
-import { useModStore } from '../store/useModStore'
 import DashboardCard from '../components/DashboardCard'
+import { Plus, Folder, DownloadSimple } from 'phosphor-react'
 import type { ModProject } from '../types'
 import '../styles/Dashboard.css'
+import { useNavigate } from 'react-router-dom'
+import { useModStore } from '../store/useModStore'
 
 export default function Dashboard() {
   const navigate = useNavigate()
@@ -19,19 +20,20 @@ export default function Dashboard() {
     console.log('Open existing mod')
   }
 
+  const handleImportMod = () => {
+    console.log('Import mod')
+  }
+
   const handleOpenProject = (project: ModProject) => {
     setProject(project)
     navigate(`/project/${project.id}`)
   }
 
-  const handleImportMod = () => {
-    console.log('Import mod')
-  }
-
   return (
     <div className="dashboard">
       <div className="dashboard-header">
-        <h1>Dashboard</h1>
+        <h1>Paralives Mod Editor</h1>
+        <p className="subtitle">Create and manage custom content for Paralives</p>
       </div>
 
       <section className="dashboard-info">
@@ -40,9 +42,26 @@ export default function Dashboard() {
 
       <section className="actions">
         <div className="actions-grid">
-          <DashboardCard icon="+" text="Create New Mod" onClick={handleCreateMod} />
-          <DashboardCard icon="+" text="Open Existing Mod" onClick={handleOpenMod} />
-          <DashboardCard icon="+" text="Import Mod" onClick={handleImportMod} />
+          <DashboardCard
+            icon={<Plus size={24} />}
+            text="Create New Mod"
+            description="Start a fresh mod project from scratch"
+            onClick={handleCreateMod}
+          />
+
+          <DashboardCard
+            icon={<Folder size={24} />}
+            text="Open Existing Mod"
+            description="Browse and open a saved mod file"
+            onClick={handleOpenMod}
+          />
+
+          <DashboardCard
+            icon={<DownloadSimple size={24} />}
+            text="Import Mod"
+            description="Import an existing mod package"
+            onClick={handleImportMod}
+          />
         </div>
       </section>
 
@@ -54,11 +73,16 @@ export default function Dashboard() {
           <div className="projects-list">
             {recentProjects.map((project) => (
               <div key={project.id} className="project-item" onClick={() => handleOpenProject(project)}>
-                <h3>{project.name}</h3>
-                <p className="project-path">{project.description}</p>
-                <p className="project-date">
-                  Last modified: {new Date(project.updatedAt).toLocaleDateString()}
-                </p>
+                <div className="project-item-left">
+                  <h3>{project.name}</h3>
+                  <p className="project-path">{project.description}</p>
+                </div>
+                <div className="project-item-meta">
+                  <div className="meta-row"><span>Author:</span><strong>{project.author || '—'}</strong></div>
+                  <div className="meta-row"><span>Version:</span><strong>{project.version}</strong></div>
+                  <div className="meta-row"><span>Items:</span><strong>{project.items.length}</strong></div>
+                  <div className="meta-row"><span>Last modified:</span><strong>{new Date(project.updatedAt).toLocaleDateString()}</strong></div>
+                </div>
               </div>
             ))}
           </div>

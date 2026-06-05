@@ -1,14 +1,20 @@
+import type { ReactNode } from 'react'
+
 interface DashboardCardProps {
-  icon: string
+  icon: ReactNode
   text: string
+  description?: string
   onClick: () => void
 }
 
-export default function DashboardCard({ icon, text, onClick }: DashboardCardProps) {
+export default function DashboardCard({ icon, text, description, onClick }: DashboardCardProps) {
   return (
     <button className="action-button" onClick={onClick}>
       <span className="button-icon">{icon}</span>
-      <span className="button-text">{text}</span>
+      <div className="button-text-wrap">
+        <span className="button-text">{text}</span>
+        {description && <span className="button-desc">{description}</span>}
+      </div>
     </button>
   )
 }
