@@ -7,7 +7,8 @@ import '../styles/Dashboard.css'
 export default function Dashboard() {
   const navigate = useNavigate()
   const createProject = useModStore((s) => s.createProject)
-  const recentProjects: ModProject[] = []
+  const recentProjects = useModStore((s) => s.recentProjects)
+  const setProject = useModStore((s) => s.setProject)
 
   const handleCreateMod = () => {
     const project = createProject()
@@ -16,6 +17,11 @@ export default function Dashboard() {
 
   const handleOpenMod = () => {
     console.log('Open existing mod')
+  }
+
+  const handleOpenProject = (project: ModProject) => {
+    setProject(project)
+    navigate(`/project/${project.id}`)
   }
 
   const handleImportMod = () => {
@@ -47,7 +53,7 @@ export default function Dashboard() {
         ) : (
           <div className="projects-list">
             {recentProjects.map((project) => (
-              <div key={project.id} className="project-item">
+              <div key={project.id} className="project-item" onClick={() => handleOpenProject(project)}>
                 <h3>{project.name}</h3>
                 <p className="project-path">{project.description}</p>
                 <p className="project-date">
