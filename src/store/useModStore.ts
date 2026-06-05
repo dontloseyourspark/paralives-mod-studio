@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { subscribeWithSelector } from 'zustand/middleware'
 import type { ModProject, Item } from '../types'
 
 interface ModStore {
@@ -37,14 +38,26 @@ const safeParse = (v: string | null) => {
   }
 }
 
-export const useModStore = create<ModStore>((set, get) => {
-  // initialize recent projects from localStorage safely
-  const initialRecent = typeof window !== 'undefined'
-    ? safeParse(window.localStorage.getItem(RECENT_KEY))
-    : []
+const safeParseSingle = (v: string | null) => {
+  try {
+    return v ? (JSON.parse(v) as ModProject) : null
+  } catch (e) {
+    return null
+  }
+}
 
-  return {
-    currentProject: null,
+// Ensure the window checks happen properly during variable initialization
+const initialRecent = typeof window !== 'undefined'
+  ? safeParse(window.localStorage.getItem(RECENT_KEY))
+  : []
+
+const initialCurrent = typeof window !== 'undefined'
+  ? safeParseSingle(window.localStorage.getItem(CURRENT_KEY))
+  : null
+
+export const useModStore = create<ModStore>()(
+  subscribeWithSelector((set, get) => ({
+    currentProject: initialCurrent,
     selectedItemId: null,
     recentProjects: initialRecent,
 
@@ -100,65 +113,66 @@ export const useModStore = create<ModStore>((set, get) => {
                 tags: [],
               },
             ],
+            updatedAt: new Date().toISOString(),
           },
         }
       }),
 
-      addItemWith: (payload: Partial<Item>) =>
-        set((state) => {
-          if (!state.currentProject) return state
+    addItemWith: (payload: Partial<Item>) =>
+      set((state) => {
+        if (!state.currentProject) return state
 
-          const newItem: Item = {
-            id: crypto.randomUUID(),
-            name: payload.name || 'New Item',
-            description: payload.description || '',
-            price: typeof payload.price === 'number' ? payload.price : 0,
-            tags: payload.tags || [],
-            category: payload.category,
-            thumbnail: payload.thumbnail,
-            translations: payload.translations,
-          }
+        const newItem: Item = {
+          id: crypto.randomUUID(),
+          name: payload.name || 'New Item',
+          description: payload.description || '',
+          price: typeof payload.price === 'number' ? payload.price : 0,
+          tags: payload.tags || [],
+          category: payload.category,
+          thumbnail: payload.thumbnail,
+          translations: payload.translations,
+        }
 
-          return {
-            currentProject: {
-              ...state.currentProject,
-              items: [...state.currentProject.items, newItem],
-              updatedAt: new Date().toISOString(),
-            },
-          }
-        }),
+        return {
+          currentProject: {
+            ...state.currentProject,
+            items: [...state.currentProject.items, newItem],
+            updatedAt: new Date().toISOString(),
+          },
+        }
+      }),
 
-      updateItem: (id: string, updates: Partial<Item>) =>
-        set((state) => {
-          if (!state.currentProject) return state
+    updateItem: (id: string, updates: Partial<Item>) =>
+      set((state) => {
+        if (!state.currentProject) return state
 
-          const items = state.currentProject.items.map((it) =>
-            it.id === id ? { ...it, ...updates } : it
-          )
+        const items = state.currentProject.items.map((it) =>
+          it.id === id ? { ...it, ...updates } : it
+        )
 
-          return {
-            currentProject: {
-              ...state.currentProject,
-              items,
-              updatedAt: new Date().toISOString(),
-            },
-          }
-        }),
+        return {
+          currentProject: {
+            ...state.currentProject,
+            items,
+            updatedAt: new Date().toISOString(),
+          },
+        }
+      }),
 
-      deleteItem: (id: string) =>
-        set((state) => {
-          if (!state.currentProject) return state
+    deleteItem: (id: string) =>
+      set((state) => {
+        if (!state.currentProject) return state
 
-          const items = state.currentProject.items.filter((it) => it.id !== id)
+        const items = state.currentProject.items.filter((it) => it.id !== id)
 
-          return {
-            currentProject: {
-              ...state.currentProject,
-              items,
-              updatedAt: new Date().toISOString(),
-            },
-          }
-        }),
+        return {
+          currentProject: {
+            ...state.currentProject,
+            items,
+            updatedAt: new Date().toISOString(),
+          },
+        }
+      }),
 
     saveProject: () => {
       const project = get().currentProject
@@ -166,14 +180,12 @@ export const useModStore = create<ModStore>((set, get) => {
 
       let saved = true
 
-      // save current
       try {
         window.localStorage.setItem(CURRENT_KEY, JSON.stringify(project))
       } catch (e) {
         saved = false
       }
 
-      // update recent list (upsert, keep most recent first)
       set((state) => {
         const existing = state.recentProjects.filter((p) => p.id !== project.id)
         const updated = [project, ...existing].slice(0, 10)
@@ -193,5 +205,20 @@ export const useModStore = create<ModStore>((set, get) => {
       const loaded = safeParse(window.localStorage.getItem(RECENT_KEY))
       set({ recentProjects: loaded })
     },
-  }
-})
+  }))
+)
+
+// --- BACKGROUND AUTO-SAVE SIDE EFFECT REACTOR ---
+if (typeof window !== 'undefined') {
+  useModStore.subscribe(
+    (state) => state.currentProject,
+    (currentProject) => {
+      if (currentProject) {
+        window.localStorage.setItem(CURRENT_KEY, JSON.stringify(currentProject))
+      } else {
+        window.localStorage.removeItem(CURRENT_KEY)
+      }
+    },
+    { fireImmediately: false }
+  )
+}
