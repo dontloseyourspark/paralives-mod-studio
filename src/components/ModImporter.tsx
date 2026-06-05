@@ -13,14 +13,23 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
     let itemsSettingContent = ''
     let translationsSettingContent = ''
     
-    // A dictionary bucket to hold component-specific settings dynamically
     const componentSettings: Record<string, string> = {}
-    const prefabFiles: string[] = []
+    const prefabContents: Record<string, string> = {}
+    
+    const prefabGuidToNameMap: Record<string, string> = {}
+    const fileNameToTextMap: Record<string, string> = {}
+    const discoveredThumbnails: Record<string, string> = {}
+    
+    // Data dictionaries to parse and link raw texture maps
+    const discoveredTextures: Record<string, string> = {}
+    let globalProjectCoverUrl: string | null = null
 
-    // Pass 1: Categorize file allocations from the directory selection tree
+    // Pass 1: Gather file data buffers and index game meta-caches
     for (const file of Array.from(fileList)) {
       const path = file.webkitRelativePath
+      const fileName = file.name
 
+      // 1A: Intercept primary manifest sheets
       if (path.endsWith('Items.setting')) {
         itemsSettingContent = await file.text()
         continue
@@ -29,16 +38,63 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
         translationsSettingContent = await file.text()
         continue
       }
-      
-      // Catch-all reader for secondary component mapping rules (e.g., ItemObjectRoot.setting)
       if (path.includes('/Settings/') && path.endsWith('.setting')) {
-        const settingName = file.name.replace('.setting', '')
+        const settingName = fileName.replace('.setting', '')
         componentSettings[settingName] = await file.text()
         continue
       }
-
+      
+      // 1B: Cache structural prefab strings
       if (path.includes('/Prefabs/') && path.endsWith('.prefab')) {
-        prefabFiles.push(file.name.replace('.prefab', ''))
+        const pName = fileName.replace('.prefab', '')
+        fileNameToTextMap[pName] = await file.text()
+        continue
+      }
+
+      // 1C: Process catalog thumbnails
+      if (path.includes('/_GeneratedThumbnails/Items/') && path.endsWith('.png')) {
+        const imageHash = fileName.replace('.png', '')
+        discoveredThumbnails[imageHash] = URL.createObjectURL(file)
+        continue
+      }
+
+      // 1D: Process raw source textures (BaseColor, Normal, Roughness)
+      if (path.split('/').length === 2 && path.endsWith('.png')) {
+        const textureKey = fileName.replace('.png', '')
+        discoveredTextures[textureKey] = URL.createObjectURL(file)
+        continue
+      }
+
+      // 1E: Process high-res master cover image
+      if (path.split('/').length === 2 && path.endsWith('.mod.thumbnail')) {
+        globalProjectCoverUrl = URL.createObjectURL(file)
+        continue
+      }
+
+      // 1F: Parse meta-cache layers to extract exact GUID lookup maps
+      if (path.endsWith('Prefabs.Metacache')) {
+        const cacheText = await file.text()
+        const blocks = cacheText.split('\n\n')
+        
+        blocks.forEach(block => {
+          const lines = block.split('\n')
+          let currentPath = ''
+          let currentGuid = ''
+          
+          lines.forEach(l => {
+            const trimL = l.trim()
+            if (trimL.startsWith('Prefabs/')) {
+              currentPath = trimL.replace('Prefabs/', '').replace('.prefab', '')
+            }
+            if (trimL.startsWith('GUID:')) {
+              currentGuid = trimL.split(':')[1].trim()
+            }
+          })
+          
+          if (currentPath && currentGuid) {
+            prefabGuidToNameMap[currentGuid] = currentPath
+          }
+        })
       }
     }
 
@@ -47,7 +103,15 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
       return
     }
 
-    // Core line splitter engine for the Paralives custom indentation format
+    // Map out the actual content blocks using cache lookups
+    Object.keys(prefabGuidToNameMap).forEach((guid) => {
+      const name = prefabGuidToNameMap[guid]
+      if (fileNameToTextMap[name]) {
+        prefabContents[guid] = fileNameToTextMap[name]
+      }
+    })
+
+    // Line splitter engine for custom tab-indented formats
     const parseParalivesSetting = (text: string) => {
       const lines = text.split('\n')
       const itemsList: any[] = []
@@ -60,7 +124,7 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
           if (currentItem && currentItem.guid) {
             itemsList.push(currentItem)
           }
-          currentItem = { tags: [], surfaces: [], defaultStates: [] }
+          currentItem = { tags: [] }
         }
 
         if (line.startsWith('=')) {
@@ -76,6 +140,7 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
               if (key === 'CustomModGUID') currentItem.modGuid = value
               if (key === 'DisplayName') currentItem.name = value
               if (key === 'PriceOverride') currentItem.price = parseFloat(value) || 0
+              if (key === 'Prefab') currentItem.targetPrefabGuid = value
               if (key === 'Value') currentItem.prefabFallbackName = value
             }
           }
@@ -89,7 +154,50 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
       return itemsList
     }
 
-    // Helper utility to parse standalone component anchors (like your surfaces maps)
+    // Specialized component graph graph parser
+    const parsePrefabGraph = (text: string) => {
+      const lines = text.split('\n')
+      const components: any[] = []
+      let currentComponent: any = null
+
+      lines.forEach((rawLine) => {
+        const line = rawLine.trim()
+        if (!line || line === '---') return
+
+        if (line.endsWith(':') && !line.startsWith('=') && !line.startsWith('@') && !line.includes('(')) {
+          if (currentComponent) components.push(currentComponent)
+          currentComponent = {
+            id: crypto.randomUUID(),
+            type: line.replace(':', ''),
+            properties: {}
+          }
+          return
+        }
+
+        if (currentComponent && line.includes(':')) {
+          const cleanProp = line.startsWith('=') ? line.substring(1) : line
+          const sepIndex = cleanProp.indexOf(':')
+          
+          if (sepIndex !== -1) {
+            const pKey = cleanProp.substring(0, sepIndex).trim()
+            const pValue = cleanProp.substring(sepIndex + 1).trim()
+            
+            if (pValue.startsWith('(') && pValue.endsWith(')')) {
+              currentComponent.properties[pKey] = pValue
+                .replace(/[()]/g, '')
+                .split(',')
+                .map(num => parseFloat(num.trim()) || 0)
+            } else {
+              currentComponent.properties[pKey] = isNaN(Number(pValue)) ? pValue : parseFloat(pValue)
+            }
+          }
+        }
+      })
+
+      if (currentComponent) components.push(currentComponent)
+      return components
+    }
+
     const extractAnchors = (text: string): string[] => {
       if (!text) return []
       const lines = text.split('\n')
@@ -103,58 +211,61 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
       return guids
     }
 
-    // Pass 2: Process metadata cross-references
+    // Pass 2: Process metadata arrays and component fields
     const itemsMeta = parseParalivesSetting(itemsSettingContent)
     const translationsMeta = parseParalivesSetting(translationsSettingContent)
-
-    // Extract anchors directly from your new component settings files
+    
     const rootStates = extractAnchors(componentSettings['ItemObjectRoot'] || '')
     const meshSurfaces = extractAnchors(componentSettings['ItemMeshReference'] || '')
 
-    // Pass 3: Bind structural properties together safely
+    // Pass 3: Bind structural properties together safely via exact GUID lookups
     const parsedItems = itemsMeta.map((metaItem) => {
       const matchedTranslation = translationsMeta.find(
         (t) => t.prefabFallbackName === 'ClutterPlasticBucket' || t.guid === metaItem.guid
       )
 
+      const targetGuid = metaItem.targetPrefabGuid || ''
+      const rawPrefabText = prefabContents[targetGuid] || ''
+      const extractedComponents = rawPrefabText ? parsePrefabGraph(rawPrefabText) : []
+      const trackingName = metaItem.name || prefabGuidToNameMap[targetGuid] || 'Imported Object'
+      const matchedThumbnailUrl = discoveredThumbnails[metaItem.guid] || discoveredThumbnails[targetGuid] || null
+
+      // Filter your text channels to associate matching texture layers to this specific mod item
+      const itemTextures: Record<string, string> = {}
+      Object.keys(discoveredTextures).forEach(texName => {
+        if (texName.toLowerCase().includes('bucket') || texName.toLowerCase().includes('plastic')) {
+          const type = texName.endsWith('BaseColor') ? 'baseColor' :
+                       texName.endsWith('Normal') ? 'normal' :
+                       texName.endsWith('Roughness') ? 'roughness' : 'secondary'
+          itemTextures[type] = discoveredTextures[texName]
+        }
+      })
+
       return {
         id: crypto.randomUUID(),
         guid: metaItem.guid || crypto.randomUUID(),
-        name: metaItem.name || 'Buckety McBucketFace',
+        name: trackingName.replace(/([A-Z])/g, ' $1').trim(),
         description: matchedTranslation ? 'Just a plastic bucket' : 'Custom decorative mod asset.',
         price: metaItem.price !== undefined ? metaItem.price : 5,
         tags: ['Decorative', 'Clutter'],
-        
-        // Injecting component configurations as reactive properties
+        thumbnail: matchedThumbnailUrl, 
+        textures: itemTextures, // <--- Attaches material layers directly to the entity node records!
         componentBlueprints: {
-          rootDefaultStates: rootStates,  // Tracks GUIDs from ItemObjectRoot.setting
-          materialSurfaces: meshSurfaces, // Tracks GUIDs from ItemMeshReference.setting
-        }
+          rootDefaultStates: rootStates,
+          materialSurfaces: meshSurfaces,
+        },
+        components: extractedComponents
       }
     })
 
-    // Fallback map injection loop if primary parse returns flat
-    if (parsedItems.length === 0 && prefabFiles.length > 0) {
-      prefabFiles.forEach((pName) => {
-        parsedItems.push({
-          id: crypto.randomUUID(),
-          guid: crypto.randomUUID(),
-          name: pName.replace(/([A-Z])/g, ' $1').trim(),
-          description: 'Imported configuration blueprint variant.',
-          price: 5,
-          tags: ['Decorative', 'Clutter'],
-          componentBlueprints: { rootDefaultStates: [], materialSurfaces: [] }
-        })
-      })
-    }
-
-    // Pass 4: Finalize the payload manifest block
+    // Pass 4: Finalize the integrated project manifest block
     const synthesizedProject: ModProject = {
       id: crypto.randomUUID(),
       name: parsedItems[0]?.name || 'Buckety McBucketFace Mod',
       description: 'Imported Paralives engine object manifest configuration.',
       version: '1.0.0',
       author: 'Studio Creator',
+      coverThumbnail: globalProjectCoverUrl, 
       items: parsedItems,
       assets: [],
       createdAt: new Date().toISOString(),
@@ -164,7 +275,6 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
     onImportComplete(synthesizedProject)
   }
 
-  // Define the non-standard folder upload properties in a clean, typed object
   const directoryAttributes = {
     webkitdirectory: "",
     directory: ""
