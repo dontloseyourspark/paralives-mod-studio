@@ -21,7 +21,8 @@ export default function ProjectHeader({
   const navigate = useNavigate()
 
   return (
-    <div className="flex justify-between items-center bg-[#11131e] px-6 py-3 border-b border-white/5 w-full h-[70px] box-border select-none">
+    
+    <div className="flex justify-between items-center bg-[#131928] px-6 py-3 border-b border-white/5 w-full h-[70px] box-border select-none"> 
       
       {/* Left side: Back arrow and Input Title stack */}
       <div className="flex items-center gap-4 h-full">
@@ -44,7 +45,7 @@ export default function ProjectHeader({
             aria-label="Mod name"
             placeholder="Untitled Mod"
           />
-          <div className="text-gray-500 text-xs mt-0.5 font-medium leading-none">Editing mod project</div>
+          <div className="text-gray-500 text-xs mt-0.5 font-regular leading-none">Editing mod project</div>
         </div>
       </div>
 
@@ -57,11 +58,11 @@ export default function ProjectHeader({
        
         {/* Save Mod Button */}
         <button 
-          className="flex items-center gap-2 px-4 py-0 text-sm font-semibold text-white bg-[#8b5cf6] hover:bg-[#7c3aed] active:bg-[#6d28d9] rounded-xl transition-colors duration-150 shadow-sm border-none outline-none cursor-pointer h-10 box-border focus:outline-none" 
+          className="flex items-center leading-6 gap-2 py-1 px-3 text-sm font-semibold text-white bg-[#8b5cf6] hover:bg-[#7c3aed] active:bg-[#6d28d9] rounded-md transition-colors duration-150 shadow-sm border-none outline-none cursor-pointer h-8 box-border focus:outline-none" 
           onClick={onSave}
         >
           <FloppyDisk size={16} weight="bold" />
-          <span className="leading-none">Save Mod</span>
+          <span className="text-xs mt-0.5 leading-none">Save Mod</span>
         </button>
 
         {/* Close Button */}
