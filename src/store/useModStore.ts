@@ -3,10 +3,12 @@ import type { ModProject, Item } from '../types'
 
 interface ModStore {
   currentProject: ModProject | null
+  selectedItemId: string | null
 
   recentProjects: ModProject[]
 
   setProject: (project: ModProject | null) => void
+  selectItem: (id: string | null) => void
 
   createProject: () => ModProject
 
@@ -43,10 +45,14 @@ export const useModStore = create<ModStore>((set, get) => {
 
   return {
     currentProject: null,
+    selectedItemId: null,
     recentProjects: initialRecent,
 
     setProject: (project) =>
-      set({ currentProject: project }),
+      set({ currentProject: project, selectedItemId: null }),
+
+    selectItem: (id) =>
+      set({ selectedItemId: id }),
 
     createProject: () => {
       const newProject: ModProject = {
