@@ -47,7 +47,7 @@ export default function Dashboard() {
 
       <section className="dashboard-info">
         <span className="button-icon">{<WarningCircle size={24} />}</span>
-        <p>Only items are supported at this moment. Other mod-focused features will be added soon.</p>
+        <span>Only items are supported at this moment. Other mod-focused features will be added soon.</span>
       </section>
 
       <section className="actions">
