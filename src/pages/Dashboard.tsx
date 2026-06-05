@@ -1,7 +1,8 @@
 import DashboardCard from '../components/DashboardCard'
-import { Plus, Folder, DownloadSimple } from 'phosphor-react'
+import { Plus, Folder, DownloadSimple, WarningCircle, X } from 'phosphor-react'
 import type { ModProject } from '../types'
 import '../styles/Dashboard.css'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useModStore } from '../store/useModStore'
 
@@ -16,12 +17,20 @@ export default function Dashboard() {
     navigate(`/project/${project.id}`)
   }
 
+  const [toast, setToast] = useState<{ message: string; type: 'error' | 'info' | 'success' } | null>(null)
+
+  useEffect(() => {
+    if (!toast) return
+    const timer = window.setTimeout(() => setToast(null), 3000)
+    return () => window.clearTimeout(timer)
+  }, [toast])
+
   const handleOpenMod = () => {
-    console.log('Open existing mod')
+    setToast({ message: 'Opening existing mods is not available yet.', type: 'error' })
   }
 
   const handleImportMod = () => {
-    console.log('Import mod')
+    setToast({ message: 'Mod import is not supported yet.', type: 'error' })
   }
 
   const handleOpenProject = (project: ModProject) => {
@@ -37,6 +46,7 @@ export default function Dashboard() {
       </div>
 
       <section className="dashboard-info">
+        <span className="button-icon">{<WarningCircle size={24} />}</span>
         <p>Only items are supported at this moment. Other mod-focused features will be added soon.</p>
       </section>
 
@@ -88,6 +98,18 @@ export default function Dashboard() {
           </div>
         )}
       </section>
+      {toast && (
+        <div className="toast-panel">
+          <div className={`toast-message toast-${toast.type}`}>
+            <div className="toast-copy">
+              <strong>{toast.message}</strong>
+            </div>
+            <button className="toast-close" onClick={() => setToast(null)} aria-label="Dismiss notification">
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -13,17 +13,17 @@ export default function ProjectOverview() {
   const setProject = useModStore((s) => s.setProject)
   
   const [savedAt, setSavedAt] = useState('')
-  const [toastMessage, setToastMessage] = useState('')
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null)
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [modalItem, setModalItem] = useState<any | null>(null)
   const navigate = useNavigate()
 
   useEffect(() => {
-    if (!toastMessage) return
+    if (!toast) return
 
-    const timer = window.setTimeout(() => setToastMessage(''), 3000)
+    const timer = window.setTimeout(() => setToast(null), 3000)
     return () => window.clearTimeout(timer)
-  }, [toastMessage])
+  }, [toast])
 
   if (!project) {
     return <div className="project-overview"><p>No project loaded.</p></div>
@@ -33,22 +33,37 @@ export default function ProjectOverview() {
     updateProject({ name: e.target.value })
   }
 
+  const handleAuthorChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    updateProject({ author: e.target.value })
+  }
+
+  const handleVersionChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    updateProject({ version: e.target.value })
+  }
+
   const handleDescriptionChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     updateProject({ description: e.target.value })
   }
 
   const handleSave = () => {
-    saveProject()
+    const success = saveProject()
+    if (!success) {
+      setToast({ message: 'Unable to save mod. Please try again.', type: 'error' })
+      return
+    }
+
     setSavedAt(new Date().toLocaleString())
-    setToastMessage('Your mod has been saved.')
+    setToast({ message: 'Your mod has been saved.', type: 'success' })
   }
+
+  const closeToast = () => setToast(null)
 
   const handleClose = () => {
     setProject(null)
     try {
       window.localStorage.removeItem('paralives-mod-studio-current-project')
     } catch (e) {
-      // ignore
+      setToast({ message: 'Could not clear current project from storage.', type: 'error' })
     }
     navigate('/')
   }
@@ -62,22 +77,36 @@ export default function ProjectOverview() {
 
   return (
     <div className="project-overview">
-      <div className="project-topbar">
-        <div className="topbar-left">
-          <button className="topbar-back" onClick={() => navigate('/')} aria-label="Back">
-            {/* left arrow */}
+      <div className="header-nav">
+        <div className="header-left">
+          <button className="back-btn" onClick={() => navigate('/')} aria-label="Back">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M15 18l-6-6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
           </button>
-          <div className="topbar-title">
-            <h2>{project.name}</h2>
-            <div className="topbar-sub">Editing mod project</div>
+          <div className="title-stack">
+            <input
+              className="title-input"
+              value={project.name}
+              onChange={handleNameChange}
+              aria-label="Mod name"
+            />
+            <div className="subtitle">Editing mod project</div>
           </div>
         </div>
 
-        <div className="topbar-right">
-          <div className="version-pill">v{project.version}</div>
-          <button className="btn-save-mod" onClick={handleSave}><FloppyDisk size={14} /> <span style={{ marginLeft: 8 }}>Save Mod</span></button>
-          <button className="btn-close-mod" onClick={handleClose}><XIcon size={14} /> <span style={{ marginLeft: 8 }}>Close</span></button>
+        <div className="header-right">
+          <input
+            className="version-input"
+            value={project.version}
+            onChange={handleVersionChange}
+            aria-label="Mod version"
+          />
+          <button className="save-btn" onClick={handleSave}>
+            <FloppyDisk size={14} />
+            <span className="save-btn-text">Save Mod</span>
+          </button>
+          <button className="close-icon-btn" onClick={handleClose} aria-label="Close">
+            <XIcon size={18} weight="bold" />
+          </button>
         </div>
       </div>
       <div className="project-grid">
@@ -88,41 +117,7 @@ export default function ProjectOverview() {
             </div>
 
             <div className="card-body">
-              <div className="row">
-                <div className="col">
-                  <label>Mod Name</label>
-                  <input
-                    type="text"
-                    value={project.name}
-                    onChange={handleNameChange}
-                    className="project-name-input"
-                    placeholder="Mod name"
-                  />
-                </div>
-                <div className="col">
-                  <label>Author</label>
-                  <input
-                    type="text"
-                    value={project.author}
-                    onChange={(e) => updateProject({ author: e.target.value })}
-                    className="project-author-input"
-                    placeholder="Author"
-                  />
-                </div>
-              </div>
-
-              <div className="row">
-                <div className="col-full">
-                  <label>Version</label>
-                  <input
-                    type="text"
-                    value={project.version}
-                    onChange={(e) => updateProject({ version: e.target.value })}
-                    className="project-version-input"
-                    placeholder="1.0.0"
-                  />
-                </div>
-              </div>
+        
 
               <div className="row">
                 <div className="col-full">
@@ -160,8 +155,23 @@ export default function ProjectOverview() {
           <div className="quick-stats card">
             <h4>Quick Stats</h4>
             <div className="stat-row"><span>Total Items</span><span className="badge">{project.items.length}</span></div>
-            <div className="stat-row"><span>Version</span><strong>{project.version}</strong></div>
-            <div className="stat-row"><span>Author</span><strong>{project.author || '—'}</strong></div>
+            <div className="stat-row stat-row-input"><span>Version</span>
+              <input
+                className="quick-stat-input"
+                value={project.version}
+                onChange={handleVersionChange}
+                aria-label="Quick edit version"
+              />
+            </div>
+            <div className="stat-row stat-row-input"><span>Author</span>
+              <input
+                className="quick-stat-input"
+                value={project.author}
+                onChange={handleAuthorChange}
+                placeholder="—"
+                aria-label="Quick edit author"
+              />
+            </div>
             <div className="stat-row"><span>Last Modified</span><strong>{new Date(project.updatedAt).toLocaleDateString()}</strong></div>
           </div>
 
@@ -175,10 +185,15 @@ export default function ProjectOverview() {
           </div>
         </aside>
       </div>
-      {toastMessage && (
+      {toast && (
         <div className="toast-panel">
-          <div className="toast-message">
-            <strong>Your mod has been saved.</strong>
+          <div className={`toast-message toast-${toast.type}`}>
+            <div className="toast-copy">
+              <strong>{toast.message}</strong>
+            </div>
+            <button className="toast-close" onClick={closeToast} aria-label="Dismiss notification">
+              <XIcon size={16} />
+            </button>
           </div>
         </div>
       )}

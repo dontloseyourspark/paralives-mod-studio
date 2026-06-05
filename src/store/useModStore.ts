@@ -17,7 +17,7 @@ interface ModStore {
   addItem: () => void
   addItemWith: (payload: Partial<Item>) => void
 
-  saveProject: () => void
+  saveProject: () => boolean
 
   loadRecentProjects: () => void
   updateItem: (id: string, updates: Partial<Item>) => void
@@ -156,13 +156,15 @@ export const useModStore = create<ModStore>((set, get) => {
 
     saveProject: () => {
       const project = get().currentProject
-      if (!project) return
+      if (!project) return false
+
+      let saved = true
 
       // save current
       try {
         window.localStorage.setItem(CURRENT_KEY, JSON.stringify(project))
       } catch (e) {
-        // ignore storage errors
+        saved = false
       }
 
       // update recent list (upsert, keep most recent first)
@@ -172,10 +174,12 @@ export const useModStore = create<ModStore>((set, get) => {
         try {
           window.localStorage.setItem(RECENT_KEY, JSON.stringify(updated))
         } catch (e) {
-          // ignore
+          saved = false
         }
         return { recentProjects: updated }
       })
+
+      return saved
     },
 
     loadRecentProjects: () => {

@@ -16,6 +16,7 @@ export default function CreateItemModal({ isOpen, onClose, item }: Props) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [price, setPrice] = useState<number>(0)
+  const [toast, setToast] = useState<{ message: string; type: 'error' | 'info' | 'success' } | null>(null)
   const nameRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
@@ -35,13 +36,29 @@ export default function CreateItemModal({ isOpen, onClose, item }: Props) {
     }
   }, [item, isOpen])
 
+  useEffect(() => {
+    if (!toast) return
+    const timer = window.setTimeout(() => setToast(null), 3000)
+    return () => window.clearTimeout(timer)
+  }, [toast])
+
   if (!isOpen) return null
 
   const handleSave = () => {
+    if (!name.trim()) {
+      setToast({ message: 'Item name is required.', type: 'error' })
+      return
+    }
+
+    if (price < 0) {
+      setToast({ message: 'Price cannot be negative.', type: 'error' })
+      return
+    }
+
     if (item) {
-      updateItem(item.id, { name, description, price })
+      updateItem(item.id, { name: name.trim(), description, price })
     } else {
-      addItemWith({ name: name || 'New Item', description, price })
+      addItemWith({ name: name.trim(), description, price })
     }
     onClose()
   }
@@ -67,6 +84,18 @@ export default function CreateItemModal({ isOpen, onClose, item }: Props) {
           <label>Price ($)</label>
           <input type="number" value={String(price)} onChange={(e) => setPrice(parseFloat(e.target.value) || 0)} />
         </div>
+        {toast && (
+          <div className={`toast-panel toast-modal`}>
+            <div className={`toast-message toast-${toast.type}`}>
+              <div className="toast-copy">
+                <strong>{toast.message}</strong>
+              </div>
+              <button className="toast-close" onClick={() => setToast(null)} aria-label="Dismiss notification">
+                <X size={16} />
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="modal-actions">
           <button className="btn-cancel" onClick={onClose}>Cancel</button>
