@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useModStore } from '../store/useModStore'
 import ItemEditor from '../components/ItemEditor'
@@ -13,9 +13,17 @@ export default function ProjectOverview() {
   const setProject = useModStore((s) => s.setProject)
   
   const [savedAt, setSavedAt] = useState('')
+  const [toastMessage, setToastMessage] = useState('')
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [modalItem, setModalItem] = useState<any | null>(null)
   const navigate = useNavigate()
+
+  useEffect(() => {
+    if (!toastMessage) return
+
+    const timer = window.setTimeout(() => setToastMessage(''), 3000)
+    return () => window.clearTimeout(timer)
+  }, [toastMessage])
 
   if (!project) {
     return <div className="project-overview"><p>No project loaded.</p></div>
@@ -32,6 +40,7 @@ export default function ProjectOverview() {
   const handleSave = () => {
     saveProject()
     setSavedAt(new Date().toLocaleString())
+    setToastMessage('Your mod has been saved.')
   }
 
   const handleClose = () => {
@@ -67,14 +76,14 @@ export default function ProjectOverview() {
 
         <div className="topbar-right">
           <div className="version-pill">v{project.version}</div>
-          <button className="btn-save-mod" onClick={handleSave}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5 4h14v16H5z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/><path d="M5 8h14" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></svg> Save Mod</button>
+          <button className="btn-save-mod" onClick={handleSave}><FloppyDisk size={14} /> <span style={{ marginLeft: 8 }}>Save Mod</span></button>
+          <button className="btn-close-mod" onClick={handleClose}><XIcon size={14} /> <span style={{ marginLeft: 8 }}>Close</span></button>
         </div>
       </div>
       <div className="project-grid">
         <div className="project-left">
           <div className="mod-card">
             <div className="card-header">
-              <h3>Mod Information</h3>
               <p className="card-sub">Basic details about your mod</p>
             </div>
 
@@ -146,11 +155,7 @@ export default function ProjectOverview() {
         </div>
 
         <aside className="project-right">
-            <div className="overview-actions">
-            <button className="btn-save-project" onClick={handleSave}><FloppyDisk size={14} /> <span style={{marginLeft:8}}>Save Mod</span></button>
-            <button className="btn-close-project" onClick={handleClose}><XIcon size={14} /> <span style={{marginLeft:8}}>Close Mod</span></button>
-            {savedAt && <div className="saved-at">{savedAt}</div>}
-          </div>
+            {savedAt && <div className="saved-at aside-saved-at">Saved: {savedAt}</div>}
 
           <div className="quick-stats card">
             <h4>Quick Stats</h4>
@@ -170,6 +175,13 @@ export default function ProjectOverview() {
           </div>
         </aside>
       </div>
+      {toastMessage && (
+        <div className="toast-panel">
+          <div className="toast-message">
+            <strong>Your mod has been saved.</strong>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
