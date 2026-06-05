@@ -183,7 +183,8 @@
   flex: 1;
 }
 
-.project-name-input {
+.project-name-input,
+.project-author-input {
   width: 100%;
   font-size: 22px;
   padding: 10px 12px;

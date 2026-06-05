@@ -55,6 +55,13 @@ export default function ProjectOverview() {
             className="project-name-input"
             placeholder="Project Name"
           />
+          <input
+            type="text"
+            value={project.author}
+            onChange={(e) => updateProject({ author: e.target.value })}
+            className="project-author-input"
+            placeholder="Author"
+          />
           <textarea
             value={project.description}
             onChange={handleDescriptionChange}
