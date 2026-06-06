@@ -1,5 +1,5 @@
 import DashboardCard from '../components/DashboardCard'
-import { Plus, Folder, DownloadSimple, WarningCircle, X } from 'phosphor-react'
+import { Plus, Folder, Book, WarningCircle, X } from 'phosphor-react'
 import type { ModProject } from '../types/types'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -74,8 +74,8 @@ export default function Dashboard() {
           />
 
           <DashboardCard
-            icon={<DownloadSimple size={24} weight="bold" className="text-gray-500" />}
-            text="Cloud Sync"
+            icon={<Book size={24} weight="bold" className="text-gray-500" />}
+            text="Read the docs"
             description="Feature coming soon"
             onClick={() => alert("Coming soon!")}
           />

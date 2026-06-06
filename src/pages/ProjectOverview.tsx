@@ -110,15 +110,15 @@ export default function ProjectOverview() {
           </button>
           
           <div className="flex flex-col min-w-0">
+            <span className="text-[10px] text-gray-500 font-mono mt-0.5 tracking-tight">
+              Now editing mod project:
+            </span>
             <input 
               type="text"
               className="bg-transparent border-none text-sm font-bold text-white outline-none m-0 p-0 truncate focus:bg-white/2 rounded px-1"
               value={currentProject.name}
               onChange={(e) => updateProject({ ...currentProject, name: e.target.value })}
-            />
-            <span className="text-[10px] text-gray-500 font-mono mt-0.5 tracking-tight">
-              Project Manifest Workspace Manager
-            </span>
+            />  
           </div>
         </div>
 

@@ -17,7 +17,7 @@ export default function ItemsPanel({ items, selectedItemId, onSelectItem }: Item
       {/* Sidebar Header */}
       <div className="p-4 border-b border-white/5 shrink-0">
         <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 m-0">
-          Mod Asset Catalog
+          Mod Assets
         </h3>
       </div>
 
