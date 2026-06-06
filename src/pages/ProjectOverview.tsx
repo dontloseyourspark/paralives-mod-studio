@@ -1,181 +1,185 @@
-import { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { ArrowLeft, FloppyDisk, Trash, Plus } from 'phosphor-react'
 import { useModStore } from '../store/useModStore'
-import AppShell from '../components/AppShell'
-import ProjectHeader from '../components/ProjectHeader'
 import ItemsPanel from '../components/ItemsPanel'
 import ItemEditorPanel from '../components/ItemEditorPanel'
-import QuickStats from '../components/QuickStats'
-import { X as XIcon, Lightbulb } from 'phosphor-react'
+import type { Item, ModProject } from '../types/types'
 
 export default function ProjectOverview() {
-  const project = useModStore((s) => s.currentProject)
-  const selectedItemId = useModStore((s) => s.selectedItemId)
-  const selectItem = useModStore((s) => s.selectItem)
-  const updateProject = useModStore((s) => s.updateProject)
-  const updateItem = useModStore((s) => s.updateItem)
-  const deleteItem = useModStore((s) => s.deleteItem)
-  const saveProject = useModStore((s) => s.saveProject)
-  const setProject = useModStore((s) => s.setProject)
-  const addItemWith = useModStore((s) => s.addItemWith)
-
-  const [savedAt, setSavedAt] = useState('')
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null)
   const navigate = useNavigate()
 
-  useEffect(() => {
-    if (!toast) return
-    const timer = window.setTimeout(() => setToast(null), 3000)
-    return () => window.clearTimeout(timer)
-  }, [toast])
+  // Centralized Zustand Store Selection Hooks
+  const currentProject = useModStore((s) => s.currentProject)
+  const selectedItemId = useModStore((s) => s.selectedItemId)
+  const setSelectedItemId = useModStore((s) => s.setSelectedItemId)
+  
+  const updateProject = useModStore((s) => s.updateProject)
+  const saveProject = useModStore((s) => s.saveProject)
+  const clearCache = useModStore((s) => s.clearCache)
+  
+  const addItemWith = useModStore((s) => s.addItemWith)
+  const updateItem = useModStore((s) => s.updateItem)
+  const deleteItem = useModStore((s) => s.deleteItem)
 
-  if (!project) {
+  const [isSaving, setIsSaving] = useState(false)
+
+  // Handle safe back-navigation and data teardown
+  const handleBackToDashboard = () => {
+    clearCache() // Line 53 Fix: Safely flush cache instead of forcing null down setProject
+    navigate('/')
+  }
+
+  // Handle full schema saving commits
+  const handleSaveProject = async () => {
+    setIsSaving(true)
+    saveProject()
+    setTimeout(() => setIsSaving(false), 800)
+  }
+
+  // Line 62 Fix: Construct a fully populated, valid structural entity
+  const handleAddNewItem = () => {
+    const newItem: Item = {
+      id: crypto.randomUUID(),
+      guid: crypto.randomUUID(),
+      name: 'New Custom Item',
+      description: 'Custom decorative mod asset configuration.',
+      price: 5,
+      tags: ['Decorative'],
+      thumbnailKey: null,
+      textureKeys: {},
+      componentBlueprints: {
+        rootDefaultStates: [],
+        materialSurfaces: []
+      },
+      components: []
+    }
+    addItemWith(newItem)
+  }
+
+  if (!currentProject) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-[#0e1017] text-gray-400">
-        <p className="text-sm font-medium">No project loaded.</p>
+      <div className="min-h-screen bg-[#0e1017] text-gray-400 flex flex-col items-center justify-center gap-4">
+        <p className="text-sm">No active mod project loaded in workspace context.</p>
+        <button onClick={() => navigate('/')} className="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-xl text-white text-xs font-semibold cursor-pointer transition-colors">
+          Return to Dashboard
+        </button>
       </div>
     )
   }
 
-  const selectedItem = project.items.find((it) => it.id === selectedItemId)
-
-  const handleSave = () => {
-    const success = saveProject()
-    if (!success) {
-      setToast({ message: 'Unable to save mod. Please try again.', type: 'error' })
-      return
-    }
-    setSavedAt(new Date().toLocaleString())
-    setToast({ message: 'Your mod has been saved.', type: 'success' })
-  }
-
-  const handleClose = () => {
-    setProject(null)
-    try {
-      window.localStorage.removeItem('paralives-mod-studio-current-project')
-    } catch (e) {
-      setToast({ message: 'Could not clear current project from storage.', type: 'error' })
-    }
-    navigate('/')
-  }
-
-  const handleAddItem = () => {
-    addItemWith({ name: 'New Item', description: '', price: 0, tags: [] })
-  }
-
-  const handleDeleteItem = (id: string) => {
-    deleteItem(id)
-    if (selectedItemId === id) {
-      selectItem(null)
-    }
-  }
-
-  // Header component
-  const header = (
-    <ProjectHeader
-      projectName={project.name}
-      projectVersion={project.version}
-      onNameChange={(value) => updateProject({ name: value })}
-      onVersionChange={(value) => updateProject({ version: value })}
-      onSave={handleSave}
-      onClose={handleClose}
-    />
-  )
-
-  // Sidebar component (consolidated left column panel layouts)
-  const sidebar = (
-    <div className="flex flex-col gap-5 w-full max-w-[320px] shrink-0">
-      {savedAt && (
-        <div className="text-xs font-semibold text-emerald-400 bg-emerald-500/10 px-3 py-2 rounded-lg border border-emerald-500/20 select-none self-start">
-          Saved: {savedAt}
-        </div>
-      )}
-
-      <QuickStats
-        totalItems={project.items.length}
-        version={project.version}
-        author={project.author}
-        lastModified={new Date(project.updatedAt).toLocaleDateString()}
-        onVersionChange={(value) => updateProject({ version: value })}
-        onAuthorChange={(value) => updateProject({ author: value })}
-      />
-
-      <ItemsPanel
-        items={project.items}
-        selectedItemId={selectedItemId}
-        onSelectItem={selectItem}
-        onAddItem={handleAddItem}
-        onDeleteItem={handleDeleteItem}
-      />
-
-      {/* Modern Dashboard Tips Card Layout with Phosphor Icons */}
-      <div className="bg-[#161923] border border-white/5 rounded-2xl p-4 flex flex-col gap-3">
-        <h4 className="text-xs font-bold uppercase tracking-wider text-gray-400 select-none flex items-center gap-1.5">
-          <Lightbulb size={16} weight="duotone" className="text-[#8b5cf6]" />
-          <span>Tips</span>
-        </h4>
-        <ul className="flex flex-col gap-3 text-xs text-gray-400 list-none p-0 m-0 leading-relaxed">
-          <li className="flex items-start gap-2">
-            <Lightbulb size={14} weight="bold" className="text-[#8b5cf6] shrink-0 mt-0.5" />
-            <span>Use descriptive names for your items to keep them organized.</span>
-          </li>
-          <li className="flex items-start gap-2">
-            <Lightbulb size={14} weight="bold" className="text-[#8b5cf6] shrink-0 mt-0.5" />
-            <span>Save your mod frequently to avoid losing work.</span>
-          </li>
-          <li className="flex items-start gap-2">
-            <Lightbulb size={14} weight="bold" className="text-[#8b5cf6] shrink-0 mt-0.5" />
-            <span>Items are saved directly to your project context.</span>
-          </li>
-        </ul>
-      </div>
-    </div>
-  )
-
-  // Main content (editor view)
-  const main = (
-    <ItemEditorPanel
-      item={selectedItem}
-      onNameChange={(value) => {
-        if (selectedItem) updateItem(selectedItem.id, { name: value })
-      }}
-      onDescriptionChange={(value) => {
-        if (selectedItem) updateItem(selectedItem.id, { description: value })
-      }}
-      onPriceChange={(value) => {
-        if (selectedItem) updateItem(selectedItem.id, { price: value })
-      }}
-      onTagsChange={(value) => {
-        if (selectedItem) updateItem(selectedItem.id, { tags: value })
-      }}
-    />
-  )
+  // Line 138 Fix: Resolve the selected item cleanly using an explicit null fallback
+  const activeSelectedItem = currentProject.items.find((i) => i.id === selectedItemId) || null
 
   return (
-    <div className="min-h-screen bg-[#0e1017] text-white overflow-x-hidden relative">
-      <AppShell header={header} sidebar={sidebar} main={main} />
-
-      {/* Styled Toast System */}
-      {toast && (
-        <div className="fixed bottom-6 right-6 z-50 animate-in fade-in slide-in-from-bottom-4 duration-200">
-          <div className={`flex items-center justify-between gap-4 px-4 py-3 rounded-xl border shadow-lg backdrop-blur-md min-w-[300px] max-w-md ${
-            toast.type === 'error' 
-              ? 'bg-rose-950/80 border-rose-500/30 text-rose-200' 
-              : 'bg-emerald-950/80 border-emerald-500/30 text-emerald-200'
-          }`}>
-            <div className="text-sm font-medium">
-              {toast.message}
-            </div>
-            <button 
-              className="bg-transparent border-none text-current opacity-60 hover:opacity-100 cursor-pointer p-0.5 flex items-center justify-center transition-opacity" 
-              onClick={() => setToast(null)} 
-              aria-label="Dismiss notification"
-            >
-              <XIcon size={16} weight="bold" />
-            </button>
+    <div className="h-screen bg-[#0e1017] text-white flex flex-col select-none overflow-hidden box-border">
+      
+      {/* PERSISTENT WORKSPACE CONTROL HEADER BAR */}
+      <header className="h-14 border-b border-white/5 bg-[#161923] px-6 flex items-center justify-between shrink-0 select-none">
+        <div className="flex items-center gap-4 min-w-0">
+          <button 
+            onClick={handleBackToDashboard}
+            className="p-2 hover:bg-white/5 text-gray-400 hover:text-white rounded-xl transition-colors cursor-pointer outline-none"
+            title="Return to home entry view"
+          >
+            <ArrowLeft size={16} weight="bold" />
+          </button>
+          
+          <div className="flex flex-col min-w-0">
+            {/* Line 78 Fix: Spread modifications completely over the active manifest project object */}
+            <input 
+              type="text"
+              className="bg-transparent border-none text-sm font-bold text-white outline-none m-0 p-0 truncate focus:bg-white/2 rounded px-1"
+              value={currentProject.name}
+              onChange={(e) => updateProject({ ...currentProject, name: e.target.value })}
+            />
+            <span className="text-[10px] text-gray-500 font-mono mt-0.5 tracking-tight">
+              Project Manifest Workspace Manager
+            </span>
           </div>
         </div>
-      )}
+
+        {/* Global Metadata Control Configurations Panel */}
+        <div className="flex items-center gap-5 shrink-0">
+          <div className="flex items-center gap-3 border-r border-white/5 pr-5 text-xs">
+            <div className="flex items-center gap-1">
+              <span className="text-gray-500">Version:</span>
+              {/* Line 79 & 98 Fix: Maintain full object structures on metadata adjustments */}
+              <input 
+                type="text"
+                className="w-12 bg-white/3 border border-white/5 text-center rounded py-0.5 text-gray-300 font-mono outline-none focus:border-[#8b5cf6]/40 text-[11px]"
+                value={currentProject.version}
+                onChange={(e) => updateProject({ ...currentProject, version: e.target.value })}
+              />
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="text-gray-500">Author:</span>
+              {/* Line 99 Fix: Layer changes cleanly over top structural configurations */}
+              <input 
+                type="text"
+                className="w-24 bg-white/3 border border-white/5 px-1.5 rounded py-0.5 text-gray-300 font-medium outline-none focus:border-[#8b5cf6]/40 text-[11px]"
+                value={currentProject.author}
+                onChange={(e) => updateProject({ ...currentProject, author: e.target.value })}
+              />
+            </div>
+          </div>
+
+          <button
+            onClick={handleSaveProject}
+            disabled={isSaving}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold bg-[#8b5cf6] hover:bg-[#7c3aed] disabled:bg-[#8b5cf6]/50 disabled:cursor-not-allowed rounded-xl cursor-pointer text-white shadow-sm transition-colors outline-none"
+          >
+            <FloppyDisk size={14} weight="bold" />
+            <span>{isSaving ? 'Saving Changes...' : 'Commit Mod'}</span>
+          </button>
+        </div>
+      </header>
+
+      {/* THREE-COLUMN PRODUCTION EDITING CANVAS SCREEN */}
+      <div className="flex-1 flex min-h-0 relative">
+        
+        {/* SIDEBAR LIST UTILITY: Manages the custom catalog items array */}
+        <div className="relative h-full flex flex-col shrink-0">
+          {/* Line 106 Fix: Map the correct parameters between the layout interface items */}
+          <ItemsPanel 
+            items={currentProject.items}
+            selectedItemId={selectedItemId}
+            onSelectItem={(item) => setSelectedItemId(item.id)}
+          />
+          
+          {/* Absolute Lower Controls Panel Matrix */}
+          <div className="absolute bottom-3 left-3 right-3 flex gap-2 select-none">
+            <button
+              onClick={handleAddNewItem}
+              className="flex-1 flex items-center justify-center gap-1 py-2 text-[11px] font-bold uppercase tracking-wider bg-white/5 hover:bg-white/10 rounded-xl cursor-pointer text-gray-300 hover:text-white border border-white/5 transition-all outline-none"
+            >
+              <Plus size={12} weight="bold" className="text-[#8b5cf6]" />
+              <span>Add Variation</span>
+            </button>
+            
+            {activeSelectedItem && (
+              <button
+                onClick={() => deleteItem(activeSelectedItem.id)}
+                className="p-2 bg-rose-950/20 hover:bg-rose-950/60 text-rose-400 rounded-xl cursor-pointer border border-rose-500/10 hover:border-rose-500/30 transition-all outline-none"
+                title="Delete highlighted structural row variation"
+              >
+                <Trash size={14} />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* WORKSPACE CENTRAL WORK CANVAS MAIN INTERFACE PANEL */}
+        <main className="flex-1 h-full min-w-0 bg-[#0e1017]">
+          {/* Lines 139 & 140+ Fix: Connect the singular update callback routine clearly */}
+          <ItemEditorPanel 
+            key={activeSelectedItem?.id}
+            item={activeSelectedItem}
+            onSave={updateItem}
+          />
+        </main>
+
+      </div>
     </div>
   )
 }

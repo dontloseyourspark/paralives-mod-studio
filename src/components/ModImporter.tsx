@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { Folder, UploadSimple } from 'phosphor-react'
-import type { ModProject } from '../types'
+import { useModStore } from '../store/useModStore'
+import type { ModProject } from '../types/types'
 
 interface ModImporterProps {
   onImportComplete: (project: ModProject) => void
@@ -8,6 +9,7 @@ interface ModImporterProps {
 
 export default function ModImporter({ onImportComplete }: ModImporterProps) {
   const [isDragging, setIsDragging] = useState(false)
+  const registerFileInCache = useModStore((state) => state.registerFileInCache)
 
   const processFiles = async (fileList: FileList | File[]) => {
     let itemsSettingContent = ''
@@ -18,18 +20,16 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
     
     const prefabGuidToNameMap: Record<string, string> = {}
     const fileNameToTextMap: Record<string, string> = {}
-    const discoveredThumbnails: Record<string, string> = {}
     
-    // Data dictionaries to parse and link raw texture maps
-    const discoveredTextures: Record<string, string> = {}
-    let globalProjectCoverUrl: string | null = null
+    const thumbnailKeys: string[] = []
+    const textureKeys: Record<string, string> = {}
+    let projectCoverKey: string | null = null
 
-    // Pass 1: Gather file data buffers and index game meta-caches
+    // Pass 1: Categorize file allocations from the directory selection tree
     for (const file of Array.from(fileList)) {
       const path = file.webkitRelativePath
       const fileName = file.name
 
-      // 1A: Intercept primary manifest sheets
       if (path.endsWith('Items.setting')) {
         itemsSettingContent = await file.text()
         continue
@@ -43,35 +43,36 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
         componentSettings[settingName] = await file.text()
         continue
       }
-      
-      // 1B: Cache structural prefab strings
       if (path.includes('/Prefabs/') && path.endsWith('.prefab')) {
         const pName = fileName.replace('.prefab', '')
         fileNameToTextMap[pName] = await file.text()
         continue
       }
 
-      // 1C: Process catalog thumbnails
+      // Store catalog items thumbnails directly in binary cache map
       if (path.includes('/_GeneratedThumbnails/Items/') && path.endsWith('.png')) {
         const imageHash = fileName.replace('.png', '')
-        discoveredThumbnails[imageHash] = URL.createObjectURL(file)
+        registerFileInCache(imageHash, file)
+        thumbnailKeys.push(imageHash)
         continue
       }
 
-      // 1D: Process raw source textures (BaseColor, Normal, Roughness)
+      // Store raw source textures binaries in binary cache map
       if (path.split('/').length === 2 && path.endsWith('.png')) {
         const textureKey = fileName.replace('.png', '')
-        discoveredTextures[textureKey] = URL.createObjectURL(file)
+        registerFileInCache(textureKey, file)
+        textureKeys[textureKey] = textureKey
         continue
       }
 
-      // 1E: Process high-res master cover image
+      // Store master project cover illustration binary in cache map
       if (path.split('/').length === 2 && path.endsWith('.mod.thumbnail')) {
-        globalProjectCoverUrl = URL.createObjectURL(file)
+        const coverKey = 'PROJECT_COVER_MASTER'
+        registerFileInCache(coverKey, file)
+        projectCoverKey = coverKey
         continue
       }
 
-      // 1F: Parse meta-cache layers to extract exact GUID lookup maps
       if (path.endsWith('Prefabs.Metacache')) {
         const cacheText = await file.text()
         const blocks = cacheText.split('\n\n')
@@ -103,7 +104,6 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
       return
     }
 
-    // Map out the actual content blocks using cache lookups
     Object.keys(prefabGuidToNameMap).forEach((guid) => {
       const name = prefabGuidToNameMap[guid]
       if (fileNameToTextMap[name]) {
@@ -111,7 +111,7 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
       }
     })
 
-    // Line splitter engine for custom tab-indented formats
+    // Core line splitter engine for the Paralives custom indentation format
     const parseParalivesSetting = (text: string) => {
       const lines = text.split('\n')
       const itemsList: any[] = []
@@ -228,16 +228,15 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
       const rawPrefabText = prefabContents[targetGuid] || ''
       const extractedComponents = rawPrefabText ? parsePrefabGraph(rawPrefabText) : []
       const trackingName = metaItem.name || prefabGuidToNameMap[targetGuid] || 'Imported Object'
-      const matchedThumbnailUrl = discoveredThumbnails[metaItem.guid] || discoveredThumbnails[targetGuid] || null
+      const matchedThumbnailKey = thumbnailKeys.find(k => k === metaItem.guid || k === targetGuid) || null
 
-      // Filter your text channels to associate matching texture layers to this specific mod item
       const itemTextures: Record<string, string> = {}
-      Object.keys(discoveredTextures).forEach(texName => {
+      Object.keys(textureKeys).forEach(texName => {
         if (texName.toLowerCase().includes('bucket') || texName.toLowerCase().includes('plastic')) {
           const type = texName.endsWith('BaseColor') ? 'baseColor' :
                        texName.endsWith('Normal') ? 'normal' :
                        texName.endsWith('Roughness') ? 'roughness' : 'secondary'
-          itemTextures[type] = discoveredTextures[texName]
+          itemTextures[type] = texName
         }
       })
 
@@ -248,8 +247,11 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
         description: matchedTranslation ? 'Just a plastic bucket' : 'Custom decorative mod asset.',
         price: metaItem.price !== undefined ? metaItem.price : 5,
         tags: ['Decorative', 'Clutter'],
-        thumbnail: matchedThumbnailUrl, 
-        textures: itemTextures, // <--- Attaches material layers directly to the entity node records!
+        
+        // References our persistent cache map indexes directly
+        thumbnailKey: matchedThumbnailKey, 
+        textureKeys: itemTextures, 
+        
         componentBlueprints: {
           rootDefaultStates: rootStates,
           materialSurfaces: meshSurfaces,
@@ -265,7 +267,7 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
       description: 'Imported Paralives engine object manifest configuration.',
       version: '1.0.0',
       author: 'Studio Creator',
-      coverThumbnail: globalProjectCoverUrl, 
+      coverThumbnailKey: projectCoverKey, 
       items: parsedItems,
       assets: [],
       createdAt: new Date().toISOString(),

@@ -1,78 +1,82 @@
-import { Plus, Trash } from 'phosphor-react'
+import React from 'react'
+import { useModStore } from '../store/useModStore'
 import type { Item } from '../types/types'
 
 interface ItemsPanelProps {
   items: Item[]
   selectedItemId: string | null
-  onSelectItem: (id: string | null) => void
-  onAddItem: () => void
-  onDeleteItem: (id: string) => void
+  // Ensure the callback is explicitly typed in your interface contract
+  onSelectItem: (item: Item) => void
 }
 
-export default function ItemsPanel({
-  items,
-  selectedItemId,
-  onSelectItem,
-  onAddItem,
-  onDeleteItem,
-}: ItemsPanelProps) {
+export default function ItemsPanel({ items, selectedItemId, onSelectItem }: ItemsPanelProps) {
+  const getBlobUrlFromCache = useModStore((state) => state.getBlobUrlFromCache)
+
   return (
-    <div className="flex flex-col gap-3 w-full bg-[#161923] border border-white/5 rounded-2xl p-4">
-      {/* Header section with count and Add Button */}
-      <div className="flex justify-between items-center select-none">
-        <h3 className="text-sm font-semibold text-white">
-          Items <span className="text-xs text-gray-500 font-medium ml-1">({items.length} total)</span>
+    <div className="w-64 h-full bg-[#161923] border-r border-white/5 flex flex-col select-none box-border">
+      {/* Sidebar Header */}
+      <div className="p-4 border-b border-white/5 shrink-0">
+        <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 m-0">
+          Mod Asset Catalog
         </h3>
-        <button 
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-[#8b5cf6] hover:bg-[#7c3aed] active:bg-[#6d28d9] rounded-xl transition-colors duration-150 border-none cursor-pointer" 
-          onClick={onAddItem} 
-          aria-label="Add item"
-        >
-          <Plus size={14} weight="bold" />
-          <span>Add Item</span>
-        </button>
       </div>
 
-      {/* Items list body */}
-      <div className="flex flex-col gap-2 max-h-[350px] overflow-y-auto pr-1">
-        {items.length === 0 ? (
-          <div className="text-xs text-gray-500 text-center py-6 px-4 bg-white/2 rounded-xl border border-dashed border-white/5 leading-relaxed">
-            No items yet. Click the Add Item button to create one.
+      {/* Scrollable Items Container List */}
+      <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-1 min-h-0">
+        {(!items || items.length === 0) ? (
+          <div className="text-xs text-gray-600 text-center py-8 italic">
+            No items inside package manifest
           </div>
         ) : (
-          items.map((item) => (
-            <div
-              key={item.id}
-              className={`group flex justify-between items-center px-4 py-3 rounded-xl border transition-all duration-150 cursor-pointer select-none ${
-                selectedItemId === item.id 
-                  ? 'bg-white/5 border-white/10 shadow-sm' 
-                  : 'bg-transparent border-white/2 hover:bg-white/2 hover:border-white/5'
-              }`}
-              onClick={() => onSelectItem(item.id)}
-            >
-              <div className="flex flex-col gap-0.5 min-w-0">
-                <div className={`text-sm font-medium truncate ${
-                  selectedItemId === item.id ? 'text-white' : 'text-gray-300'
-                }`}>
-                  {item.name || 'Untitled Item'}
+          items.map((item) => {
+            const isSelected = item.id === selectedItemId
+            // Dynamic secure resolution of binary file URLs from global cache
+            const liveThumbnailUrl = getBlobUrlFromCache(item.thumbnailKey ?? null)
+
+            return (
+              <div
+                key={item.id}
+                onClick={() => {
+                  // Defensive guard check: Only execute if the callback function is defined
+                  if (typeof onSelectItem === 'function') {
+                    onSelectItem(item)
+                  } else {
+                    console.warn("Warning: onSelectItem prop was not provided to ItemsPanel.")
+                  }
+                }}
+                className={`flex items-center gap-3 p-2.5 rounded-xl transition-all duration-150 cursor-pointer group border ${
+                  isSelected
+                    ? 'bg-[#8b5cf6]/10 border-[#8b5cf6]/30 text-white'
+                    : 'bg-transparent border-transparent text-gray-400 hover:bg-white/2 hover:text-gray-200'
+                }`}
+              >
+                {/* Visual Thumbnail Preview Rounded Frame */}
+                <div className="w-9 h-9 shrink-0 bg-[#0e1017] border border-white/5 rounded-lg overflow-hidden flex items-center justify-center shadow-inner">
+                  {liveThumbnailUrl ? (
+                    <img 
+                      src={liveThumbnailUrl} 
+                      alt={item.name} 
+                      className="w-full h-full object-contain p-1 transform group-hover:scale-105 transition-transform duration-150" 
+                    />
+                  ) : (
+                    <span className="text-[10px] font-bold text-gray-600 uppercase font-mono">
+                      {(item.name || 'UN').substring(0, 2)}
+                    </span>
+                  )}
                 </div>
-                <div className="text-xs text-gray-500">
-                  Price: ${item.price}
+
+                {/* Meta Information Label Stack */}
+                <div className="flex flex-col min-w-0">
+                  <span className={`text-xs font-medium truncate ${isSelected ? 'text-white' : 'text-gray-300 group-hover:text-white'}`}>
+                    {item.name || 'Untitled Object'}
+                  </span>
+                  <span className="text-[10px] text-gray-500 font-mono mt-0.5">
+                    ${item.price ?? 0}
+                  </span>
                 </div>
               </div>
-              
-              <button
-                className="bg-transparent border-none p-1.5 rounded-lg text-gray-500 hover:text-rose-400 hover:bg-rose-500/10 cursor-pointer flex items-center justify-center opacity-0 group-hover:opacity-100 focus:opacity-100 transition-all duration-150"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onDeleteItem(item.id)
-                }}
-                aria-label="Delete item"
-              >
-                <Trash size={14} />
-              </button>
-            </div>
-          ))
+            )
+          })
         )}
       </div>
     </div>

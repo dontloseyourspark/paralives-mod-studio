@@ -1,224 +1,164 @@
 import { create } from 'zustand'
-import { subscribeWithSelector } from 'zustand/middleware'
 import type { ModProject, Item } from '../types/types'
 
-interface ModStore {
+interface ModStoreState {
   currentProject: ModProject | null
-  selectedItemId: string | null
-
   recentProjects: ModProject[]
-
-  setProject: (project: ModProject | null) => void
-  selectItem: (id: string | null) => void
-
+  // Track the active item selection at the global store level
+  selectedItemId: string | null
+  selectItem: (id: string | null) => void // <-- ADD THIS LINE
+  // Global persistent binary file buffers cache map
+  binaryFileCache: Record<string, File>
+  
+  setProject: (project: ModProject) => void
+  setSelectedItemId: (id: string | null) => void
   createProject: () => ModProject
-
-  updateProject: (
-    updates: Partial<ModProject>
-  ) => void
-
-  addItem: () => void
-  addItemWith: (payload: Partial<Item>) => void
-
-  saveProject: () => boolean
-
-  loadRecentProjects: () => void
-  updateItem: (id: string, updates: Partial<Item>) => void
-  deleteItem: (id: string) => void
+  updateProject: (updatedProject: ModProject) => void
+  saveProject: () => void
+  
+  // Item Level Entity CRUD Actions
+  addItemWith: (item: Item) => void
+  updateItem: (updatedItem: Item) => void
+  deleteItem: (itemId: string) => void
+  
+  registerFileInCache: (key: string, file: File) => void
+  getBlobUrlFromCache: (key: string | null) => string | null
+  clearCache: () => void
 }
 
-const RECENT_KEY = 'paralives-mod-studio-recent-projects'
-const CURRENT_KEY = 'paralives-mod-studio-current-project'
+export const useModStore = create<ModStoreState>((set, get) => ({
+  currentProject: null,
+  recentProjects: [],
+  selectedItemId: null,
+  binaryFileCache: {},
 
-const safeParse = (v: string | null) => {
-  try {
-    return v ? (JSON.parse(v) as ModProject[]) : []
-  } catch (e) {
-    return []
-  }
-}
+  setProject: (project) => set({ currentProject: project }),
 
-const safeParseSingle = (v: string | null) => {
-  try {
-    return v ? (JSON.parse(v) as ModProject) : null
-  } catch (e) {
-    return null
-  }
-}
+  setSelectedItemId: (id) => set({ selectedItemId: id }),
+  selectItem: (id) => set({ selectedItemId: id }), // <-- ADD THIS ALIAS LINE
 
-// Ensure the window checks happen properly during variable initialization
-const initialRecent = typeof window !== 'undefined'
-  ? safeParse(window.localStorage.getItem(RECENT_KEY))
-  : []
+  createProject: () => {
+    const newProject: ModProject = {
+      id: crypto.randomUUID(),
+      name: 'New Custom Mod',
+      description: 'A fresh standalone Paralives content configuration package.',
+      version: '1.0.0',
+      author: 'Studio Creator',
+      coverThumbnailKey: null,
+      items: [],
+      assets: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }
+    
+    set((state) => ({
+      currentProject: newProject,
+      recentProjects: [newProject, ...state.recentProjects]
+    }))
+    
+    return newProject
+  },
 
-const initialCurrent = typeof window !== 'undefined'
-  ? safeParseSingle(window.localStorage.getItem(CURRENT_KEY))
-  : null
+  updateProject: (updatedProject) => set((state) => ({
+    currentProject: updatedProject,
+    recentProjects: state.recentProjects.map((p) => 
+      p.id === updatedProject.id ? updatedProject : p
+    )
+  })),
 
-export const useModStore = create<ModStore>()(
-  subscribeWithSelector((set, get) => ({
-    currentProject: initialCurrent,
-    selectedItemId: null,
-    recentProjects: initialRecent,
+  saveProject: () => {
+    const { currentProject, recentProjects } = get()
+    if (!currentProject) return
 
-    setProject: (project) =>
-      set({ currentProject: project, selectedItemId: null }),
+    const timestampedProject = {
+      ...currentProject,
+      updatedAt: new Date().toISOString()
+    }
 
-    selectItem: (id) =>
-      set({ selectedItemId: id }),
+    // Commits changes to the persistent history stack
+    set({
+      currentProject: timestampedProject,
+      recentProjects: recentProjects.map((p) =>
+        p.id === timestampedProject.id ? timestampedProject : p
+      )
+    })
+    console.log('Project committed securely to workspace manifest history.')
+  },
 
-    createProject: () => {
-      const newProject: ModProject = {
-        id: crypto.randomUUID(),
-        name: 'Untitled Mod',
-        description: 'My amazing mod',
-        version: '1.0.0',
-        author: '',
-        items: [],
-        assets: [],
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      }
-      set({ currentProject: newProject })
-      return newProject
-    },
+  addItemWith: (newItem) => set((state) => {
+    if (!state.currentProject) return state
+    
+    const updatedProject = {
+      ...state.currentProject,
+      items: [...state.currentProject.items, newItem],
+      updatedAt: new Date().toISOString()
+    }
 
-    updateProject: (updates) =>
-      set((state) => {
-        if (!state.currentProject) return state
+    return {
+      currentProject: updatedProject,
+      selectedItemId: newItem.id, // Auto-select the newly spawned asset node
+      recentProjects: state.recentProjects.map((p) =>
+        p.id === updatedProject.id ? updatedProject : p
+      )
+    }
+  }),
 
-        return {
-          currentProject: {
-            ...state.currentProject,
-            ...updates,
-            updatedAt: new Date().toISOString(),
-          },
-        }
-      }),
+  updateItem: (updatedItem) => set((state) => {
+    if (!state.currentProject) return state
+    
+    const updatedItems = state.currentProject.items.map((item) => 
+      item.id === updatedItem.id ? updatedItem : item
+    )
 
-    addItem: () =>
-      set((state) => {
-        if (!state.currentProject) return state
+    const updatedProject = {
+      ...state.currentProject,
+      items: updatedItems,
+      updatedAt: new Date().toISOString()
+    }
 
-        return {
-          currentProject: {
-            ...state.currentProject,
-            items: [
-              ...state.currentProject.items,
-              {
-                id: crypto.randomUUID(),
-                name: 'New Item',
-                description: '',
-                price: 0,
-                tags: [],
-              },
-            ],
-            updatedAt: new Date().toISOString(),
-          },
-        }
-      }),
+    return {
+      currentProject: updatedProject,
+      recentProjects: state.recentProjects.map((p) => 
+        p.id === updatedProject.id ? updatedProject : p
+      )
+    }
+  }),
 
-    addItemWith: (payload: Partial<Item>) =>
-      set((state) => {
-        if (!state.currentProject) return state
+  deleteItem: (itemId) => set((state) => {
+    if (!state.currentProject) return state
 
-        const newItem: Item = {
-          id: crypto.randomUUID(),
-          name: payload.name || 'New Item',
-          description: payload.description || '',
-          price: typeof payload.price === 'number' ? payload.price : 0,
-          tags: payload.tags || [],
-          category: payload.category,
-          thumbnail: payload.thumbnail,
-          translations: payload.translations,
-        }
+    const updatedItems = state.currentProject.items.filter((item) => item.id !== itemId)
+    
+    const updatedProject = {
+      ...state.currentProject,
+      items: updatedItems,
+      updatedAt: new Date().toISOString()
+    }
 
-        return {
-          currentProject: {
-            ...state.currentProject,
-            items: [...state.currentProject.items, newItem],
-            updatedAt: new Date().toISOString(),
-          },
-        }
-      }),
+    // Reset the selection pointer if the active item was deleted
+    const nextSelectedId = state.selectedItemId === itemId 
+      ? (updatedItems[0]?.id ?? null) 
+      : state.selectedItemId
 
-    updateItem: (id: string, updates: Partial<Item>) =>
-      set((state) => {
-        if (!state.currentProject) return state
+    return {
+      currentProject: updatedProject,
+      selectedItemId: nextSelectedId,
+      recentProjects: state.recentProjects.map((p) =>
+        p.id === updatedProject.id ? updatedProject : p
+      )
+    }
+  }),
 
-        const items = state.currentProject.items.map((it) =>
-          it.id === id ? { ...it, ...updates } : it
-        )
+  registerFileInCache: (key, file) => set((state) => ({
+    binaryFileCache: { ...state.binaryFileCache, [key]: file }
+  })),
 
-        return {
-          currentProject: {
-            ...state.currentProject,
-            items,
-            updatedAt: new Date().toISOString(),
-          },
-        }
-      }),
+  getBlobUrlFromCache: (key) => {
+    if (!key) return null
+    const file = get().binaryFileCache[key]
+    if (!file) return null
+    return URL.createObjectURL(file)
+  },
 
-    deleteItem: (id: string) =>
-      set((state) => {
-        if (!state.currentProject) return state
-
-        const items = state.currentProject.items.filter((it) => it.id !== id)
-
-        return {
-          currentProject: {
-            ...state.currentProject,
-            items,
-            updatedAt: new Date().toISOString(),
-          },
-        }
-      }),
-
-    saveProject: () => {
-      const project = get().currentProject
-      if (!project) return false
-
-      let saved = true
-
-      try {
-        window.localStorage.setItem(CURRENT_KEY, JSON.stringify(project))
-      } catch (e) {
-        saved = false
-      }
-
-      set((state) => {
-        const existing = state.recentProjects.filter((p) => p.id !== project.id)
-        const updated = [project, ...existing].slice(0, 10)
-        try {
-          window.localStorage.setItem(RECENT_KEY, JSON.stringify(updated))
-        } catch (e) {
-          saved = false
-        }
-        return { recentProjects: updated }
-      })
-
-      return saved
-    },
-
-    loadRecentProjects: () => {
-      if (typeof window === 'undefined') return
-      const loaded = safeParse(window.localStorage.getItem(RECENT_KEY))
-      set({ recentProjects: loaded })
-    },
-  }))
-)
-
-// --- BACKGROUND AUTO-SAVE SIDE EFFECT REACTOR ---
-if (typeof window !== 'undefined') {
-  useModStore.subscribe(
-    (state) => state.currentProject,
-    (currentProject) => {
-      if (currentProject) {
-        window.localStorage.setItem(CURRENT_KEY, JSON.stringify(currentProject))
-      } else {
-        window.localStorage.removeItem(CURRENT_KEY)
-      }
-    },
-    { fireImmediately: false }
-  )
-}
+  clearCache: () => set({ binaryFileCache: {}, currentProject: null, recentProjects: [], selectedItemId: null })
+}))

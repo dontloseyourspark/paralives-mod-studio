@@ -11,6 +11,9 @@ export default function Dashboard() {
   const createProject = useModStore((s) => s.createProject)
   const recentProjects = useModStore((s) => s.recentProjects)
   const setProject = useModStore((s) => s.setProject)
+  
+  // Hook to pull the persistent binary image access URLs out of memory
+  const getBlobUrlFromCache = useModStore((s) => s.getBlobUrlFromCache)
 
   const handleCreateMod = () => {
     const project = createProject()
@@ -29,15 +32,10 @@ export default function Dashboard() {
     setToast({ message: 'Opening existing mods is not available yet.', type: 'error' })
   }
 
-
-
   const handleImportComplete = (importedProject: ModProject) => {
-  // 1. Save the newly imported project directly into your Zustand store state
-  setProject(importedProject) 
-  
-  // 2. Send the browser over to the workspace overview editor screen for this specific project ID
-  navigate(`/project/${importedProject.id}`) 
-}
+    setProject(importedProject) 
+    navigate(`/project/${importedProject.id}`) 
+  }
 
   const handleOpenProject = (project: ModProject) => {
     setProject(project)
@@ -75,62 +73,78 @@ export default function Dashboard() {
             onClick={handleOpenMod}
           />
 
-          {/* Muted placeholder card because the dropzone below replaces its functional intent */}
-        <DashboardCard
-          icon={<DownloadSimple size={24} weight="bold" className="text-gray-500" />}
-          text="Cloud Sync"
-          description="Feature coming soon"
-          onClick={() => alert("Coming soon!")}
-        />
+          <DashboardCard
+            icon={<DownloadSimple size={24} weight="bold" className="text-gray-500" />}
+            text="Cloud Sync"
+            description="Feature coming soon"
+            onClick={() => alert("Coming soon!")}
+          />
         </div>
       </section>
 
-      {/* NEW: Dedicated Ingest Zone Section */}
-    <section className="flex flex-col gap-4">
-      <h2 className="text-lg font-semibold tracking-tight text-gray-300 m-0">Import External Mod Package</h2>
-      <ModImporter onImportComplete={handleImportComplete} />
-    </section>
+      {/* Dedicated Ingest Dropzone Section */}
+      <section className="flex flex-col gap-4">
+        <h2 className="text-lg font-semibold tracking-tight text-gray-300 m-0">Import External Mod Package</h2>
+        <ModImporter onImportComplete={handleImportComplete} />
+      </section>
 
       {/* Recent Projects List */}
       <section className="flex flex-col gap-4">
         <h2 className="text-lg font-semibold tracking-tight text-gray-300 select-none m-0">Recent Projects</h2>
         
-        {recentProjects.length === 0 ? (
+        {(!recentProjects || recentProjects.length === 0) ? (
           <div className="text-sm text-gray-500 text-center py-12 px-4 bg-[#161923] rounded-2xl border border-dashed border-white/5 leading-relaxed select-none">
             No recent projects yet. Create or open a mod to get started!
           </div>
         ) : (
           <div className="flex flex-col gap-3">
-            {recentProjects.map((project) => (
-              <div 
-                key={project.id} 
-                className="flex flex-col md:flex-row md:justify-between md:items-center gap-4 p-5 bg-[#161923] border border-white/5 hover:border-white/10 hover:bg-white/2 rounded-2xl cursor-pointer transition-all duration-150 select-none group" 
-                onClick={() => handleOpenProject(project)}
-              >
-                {/* Project Identity */}
-                <div className="flex flex-col gap-1 min-w-0">
-                  <h3 className="text-base font-semibold text-white group-hover:text-[#8b5cf6] transition-colors m-0 truncate">
-                    {project.name || 'Untitled Mod'}
-                  </h3>
-                  <p className="text-xs text-gray-500 truncate m-0 max-w-md">
-                    {project.description || 'No description provided.'}
-                  </p>
+            {recentProjects.map((project) => {
+              // Resolve the high-res root cover image directly out of our global file buffer cache
+              const liveCoverUrl = getBlobUrlFromCache(project.coverThumbnailKey ?? null)
+
+              return (
+                <div 
+                  key={project.id} 
+                  className="flex flex-col md:flex-row md:items-center gap-4 p-4 bg-[#161923] border border-white/5 hover:border-white/10 hover:bg-white/2 rounded-2xl cursor-pointer transition-all duration-150 select-none group" 
+                  onClick={() => handleOpenProject(project)}
+                >
+                  {/* Visual Project Cover Artwork Node */}
+                  <div className="w-14 h-14 bg-black/20 border border-white/5 rounded-xl overflow-hidden shrink-0 flex items-center justify-center p-0.5 shadow-inner">
+                    {liveCoverUrl ? (
+                      <img src={liveCoverUrl} alt={project.name} className="w-full h-full object-cover rounded-lg" />
+                    ) : (
+                      <Folder size={20} className="text-gray-600" />
+                    )}
+                  </div>
+
+                  {/* Project Identity Labels */}
+                  <div className="flex-1 flex flex-col gap-0.5 min-w-0">
+                    <h3 className="text-sm font-semibold text-white group-hover:text-[#8b5cf6] transition-colors m-0 truncate">
+                      {project.name || 'Untitled Mod'}
+                    </h3>
+                    <p className="text-xs text-gray-500 truncate m-0 max-w-md">
+                      {project.description || 'No description provided.'}
+                    </p>
+                  </div>
+                  
+                  {/* Meta Information Metadata Metrics */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2 text-[11px] border-t border-white/5 md:border-none pt-3 md:pt-0 shrink-0">
+                    <div className="flex items-center gap-1.5"><span className="text-gray-500">Author:</span><strong className="text-gray-300 font-semibold truncate max-w-[80px]">{project.author || '—'}</strong></div>
+                    <div className="flex items-center gap-1.5"><span className="text-gray-500">Version:</span><strong className="text-gray-300 font-semibold">{project.version || '1.0.0'}</strong></div>
+                    
+                    {/* CRITICAL SAFETY UPDATE: Optional chaining maps safely if items is empty/undefined */}
+                    <div className="flex items-center gap-1.5"><span className="text-gray-500">Items:</span><strong className="text-gray-300 font-semibold">{project?.items?.length ?? 0}</strong></div>
+                    
+                    <div className="flex items-center gap-1.5"><span className="text-gray-500">Modified:</span><strong className="text-gray-300 font-semibold">{project.updatedAt ? new Date(project.updatedAt).toLocaleDateString() : '—'}</strong></div>
+                  </div>
                 </div>
-                
-                {/* Meta Matrix Grid */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2 text-xs border-t border-white/5 md:border-none pt-3 md:pt-0 shrink-0">
-                  <div className="flex items-center gap-1.5"><span className="text-gray-500">Author:</span><strong className="text-gray-300 font-semibold">{project.author || '—'}</strong></div>
-                  <div className="flex items-center gap-1.5"><span className="text-gray-500">Version:</span><strong className="text-gray-300 font-semibold">{project.version}</strong></div>
-                  <div className="flex items-center gap-1.5"><span className="text-gray-500">Items:</span><strong className="text-gray-300 font-semibold">{project.items.length}</strong></div>
-                  <div className="flex items-center gap-1.5"><span className="text-gray-500">Modified:</span><strong className="text-gray-300 font-semibold">{new Date(project.updatedAt).toLocaleDateString()}</strong></div>
-                </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </section>
 
-      {/* Toast Overlay */}
+      {/* Toast Overlay Banner Notifications */}
       {toast && (
         <div className="fixed bottom-6 right-6 z-50 animate-in fade-in slide-in-from-bottom-4 duration-200">
           <div className={`flex items-center justify-between gap-4 px-4 py-3 rounded-xl border shadow-lg backdrop-blur-md min-w-[300px] max-w-md ${
@@ -144,7 +158,6 @@ export default function Dashboard() {
             <button 
               className="bg-transparent border-none text-current opacity-60 hover:opacity-100 cursor-pointer p-0.5 flex items-center justify-center transition-opacity focus:outline-none" 
               onClick={() => setToast(null)} 
-              aria-label="Dismiss notification"
             >
               <X size={16} weight="bold" />
             </button>
