@@ -170,14 +170,14 @@ export default function ProjectOverview() {
               className="flex-1 flex items-center justify-center gap-1 py-2 text-[11px] font-bold uppercase tracking-wider bg-white/5 hover:bg-white/10 rounded-xl cursor-pointer text-gray-300 hover:text-white border border-white/5 transition-all outline-none"
             >
               <Plus size={12} weight="bold" className="text-[#8b5cf6]" />
-              <span>Add Variation</span>
+              <span>Add Item</span>
             </button>
             
             {activeSelectedItem && (
               <button
                 onClick={() => deleteItem(activeSelectedItem.id)}
                 className="p-2 bg-rose-950/20 hover:bg-rose-950/60 text-rose-400 rounded-xl cursor-pointer border border-rose-500/10 hover:border-rose-500/30 transition-all outline-none"
-                title="Delete highlighted structural row variation"
+                title="Delete highlighted structural row item"
               >
                 <Trash size={14} />
               </button>
