@@ -39,13 +39,13 @@ export default function ProjectHeader({
         <div className="flex flex-col justify-center">
           {/* Invisible style input field */}
           <input
-            className="bg-transparent border-none outline-none text-white font-semibold text-lg p-0 m-0 w-64 focus:outline-none focus:ring-0 placeholder-gray-500 line-height-none"
+            className="leading-none bg-transparent border-none outline-none text-white font-semibold text-xl w-64 focus:outline-none focus:ring-0 placeholder-gray-500 line-height-none  p-0 m-0"
             value={projectName}
             onChange={(e) => onNameChange(e.target.value)}
             aria-label="Mod name"
             placeholder="Untitled Mod"
           />
-          <div className="text-gray-500 text-xs mt-0.5 font-regular leading-none">Editing mod project</div>
+          <div className="text-gray-500 text-sm mt-0 font-regular leading-none">Editing mod project</div>
         </div>
       </div>
 
