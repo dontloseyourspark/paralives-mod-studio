@@ -1,19 +1,23 @@
-import React, { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import React, { useState, useEffect } from 'react' // 1. Ensure useEffect is imported
+import { useNavigate, useParams } from 'react-router-dom' // 2. Import useParams to read the URL slug
 import { ArrowLeft, FloppyDisk, Trash, Plus } from 'phosphor-react'
 import { useModStore } from '../store/useModStore'
 import ItemsPanel from '../components/ItemsPanel'
 import ItemEditorPanel from '../components/ItemEditorPanel'
-import type { Item, ModProject } from '../types/types'
+import type { Item } from '../types/types'
 
 export default function ProjectOverview() {
   const navigate = useNavigate()
+  const { projectId } = useParams<{ projectId: string }>() // Grab :projectId from your route path definitions
 
-  // Centralized Zustand Store Selection Hooks
+  // Store variables
   const currentProject = useModStore((s) => s.currentProject)
+  const recentProjects = useModStore((s) => s.recentProjects)
   const selectedItemId = useModStore((s) => s.selectedItemId)
-  const setSelectedItemId = useModStore((s) => s.setSelectedItemId)
   
+  // Store mutators
+  const setProject = useModStore((s) => s.setProject)
+  const setSelectedItemId = useModStore((s) => s.setSelectedItemId)
   const updateProject = useModStore((s) => s.updateProject)
   const saveProject = useModStore((s) => s.saveProject)
   const clearCache = useModStore((s) => s.clearCache)
@@ -23,21 +27,39 @@ export default function ProjectOverview() {
   const deleteItem = useModStore((s) => s.deleteItem)
 
   const [isSaving, setIsSaving] = useState(false)
+  const [isRehydrating, setIsRehydrating] = useState(true) // Loading flag to block premature fallback screens
 
-  // Handle safe back-navigation and data teardown
+  // NEW: Deep linking rehydration lifecycle pass
+  useEffect(() => {
+    if (!currentProject && projectId && recentProjects.length > 0) {
+      console.log(`[Workspace:Init] Cold boot detected on URL path. Locating project ID: ${projectId}`)
+      const matchingProject = recentProjects.find((p) => p.id === projectId)
+      
+      if (matchingProject) {
+        setProject(matchingProject)
+        // Auto-select the first variation row to prevent an empty initial workspace state
+        if (matchingProject.items && matchingProject.items.length > 0) {
+          setSelectedItemId(matchingProject.items[0].id)
+        }
+      } else {
+        console.error(`[Workspace:Init] No matching history record found for ID: ${projectId}`)
+        navigate('/') // Send them home safely if the ID is corrupt or missing
+      }
+    }
+    setIsRehydrating(false)
+  }, [projectId, currentProject, recentProjects, setProject, setSelectedItemId, navigate])
+
   const handleBackToDashboard = () => {
-    clearCache() // Line 53 Fix: Safely flush cache instead of forcing null down setProject
+    clearCache() // Soft reset flushes active workspace pointers without touching IndexedDB disk caches
     navigate('/')
   }
 
-  // Handle full schema saving commits
   const handleSaveProject = async () => {
     setIsSaving(true)
     saveProject()
     setTimeout(() => setIsSaving(false), 800)
   }
 
-  // Line 62 Fix: Construct a fully populated, valid structural entity
   const handleAddNewItem = () => {
     const newItem: Item = {
       id: crypto.randomUUID(),
@@ -48,15 +70,18 @@ export default function ProjectOverview() {
       tags: ['Decorative'],
       thumbnailKey: null,
       textureKeys: {},
-      componentBlueprints: {
-        rootDefaultStates: [],
-        materialSurfaces: []
-      },
+      componentBlueprints: { rootDefaultStates: [], materialSurfaces: [] },
       components: []
     }
     addItemWith(newItem)
   }
 
+  // 1. Show an empty loading bridge while your async store hydration finishes
+  if (isRehydrating) {
+    return <div className="min-h-screen bg-[#0e1017] text-gray-500 flex items-center justify-center text-xs">Synchronizing project workspace profile...</div>
+  }
+
+  // 2. Fallback execution if no layout matches were tracked down
   if (!currentProject) {
     return (
       <div className="min-h-screen bg-[#0e1017] text-gray-400 flex flex-col items-center justify-center gap-4">
@@ -68,7 +93,6 @@ export default function ProjectOverview() {
     )
   }
 
-  // Line 138 Fix: Resolve the selected item cleanly using an explicit null fallback
   const activeSelectedItem = currentProject.items.find((i) => i.id === selectedItemId) || null
 
   return (
@@ -86,7 +110,6 @@ export default function ProjectOverview() {
           </button>
           
           <div className="flex flex-col min-w-0">
-            {/* Line 78 Fix: Spread modifications completely over the active manifest project object */}
             <input 
               type="text"
               className="bg-transparent border-none text-sm font-bold text-white outline-none m-0 p-0 truncate focus:bg-white/2 rounded px-1"
@@ -99,12 +122,10 @@ export default function ProjectOverview() {
           </div>
         </div>
 
-        {/* Global Metadata Control Configurations Panel */}
         <div className="flex items-center gap-5 shrink-0">
           <div className="flex items-center gap-3 border-r border-white/5 pr-5 text-xs">
             <div className="flex items-center gap-1">
               <span className="text-gray-500">Version:</span>
-              {/* Line 79 & 98 Fix: Maintain full object structures on metadata adjustments */}
               <input 
                 type="text"
                 className="w-12 bg-white/3 border border-white/5 text-center rounded py-0.5 text-gray-300 font-mono outline-none focus:border-[#8b5cf6]/40 text-[11px]"
@@ -114,7 +135,6 @@ export default function ProjectOverview() {
             </div>
             <div className="flex items-center gap-1">
               <span className="text-gray-500">Author:</span>
-              {/* Line 99 Fix: Layer changes cleanly over top structural configurations */}
               <input 
                 type="text"
                 className="w-24 bg-white/3 border border-white/5 px-1.5 rounded py-0.5 text-gray-300 font-medium outline-none focus:border-[#8b5cf6]/40 text-[11px]"
@@ -130,24 +150,20 @@ export default function ProjectOverview() {
             className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold bg-[#8b5cf6] hover:bg-[#7c3aed] disabled:bg-[#8b5cf6]/50 disabled:cursor-not-allowed rounded-xl cursor-pointer text-white shadow-sm transition-colors outline-none"
           >
             <FloppyDisk size={14} weight="bold" />
-            <span>{isSaving ? 'Saving Changes...' : 'Commit Mod'}</span>
+            <span>{isSaving ? 'Saving Changes...' : 'Save Mod'}</span>
           </button>
         </div>
       </header>
 
       {/* THREE-COLUMN PRODUCTION EDITING CANVAS SCREEN */}
       <div className="flex-1 flex min-h-0 relative">
-        
-        {/* SIDEBAR LIST UTILITY: Manages the custom catalog items array */}
         <div className="relative h-full flex flex-col shrink-0">
-          {/* Line 106 Fix: Map the correct parameters between the layout interface items */}
           <ItemsPanel 
             items={currentProject.items}
             selectedItemId={selectedItemId}
             onSelectItem={(item) => setSelectedItemId(item.id)}
           />
           
-          {/* Absolute Lower Controls Panel Matrix */}
           <div className="absolute bottom-3 left-3 right-3 flex gap-2 select-none">
             <button
               onClick={handleAddNewItem}
@@ -169,16 +185,13 @@ export default function ProjectOverview() {
           </div>
         </div>
 
-        {/* WORKSPACE CENTRAL WORK CANVAS MAIN INTERFACE PANEL */}
         <main className="flex-1 h-full min-w-0 bg-[#0e1017]">
-          {/* Lines 139 & 140+ Fix: Connect the singular update callback routine clearly */}
           <ItemEditorPanel 
             key={activeSelectedItem?.id}
             item={activeSelectedItem}
             onSave={updateItem}
           />
         </main>
-
       </div>
     </div>
   )
