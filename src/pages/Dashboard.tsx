@@ -53,7 +53,7 @@ export default function Dashboard() {
       {/* Warning/Info Callout */}
       <section className="flex items-center gap-3 bg-amber-500/10 border border-amber-500/20 px-4 py-3 rounded-2xl text-amber-200 text-sm font-medium select-none">
         <WarningCircle size={22} className="text-amber-500 shrink-0" />
-        <span>Only items are supported at this moment. Other mod-focused features will be added soon.</span>
+        <span>Only furniture items are supported at this moment. Other mod-focused features will be added soon.</span>
       </section>
 
       {/* Primary Actions Grid */}
