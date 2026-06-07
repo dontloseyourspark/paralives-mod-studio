@@ -24,7 +24,7 @@ interface ModStoreState {
   registerFileInCache: (key: string, file: File | Blob) => void
   getBlobUrlFromCache: (key: string | null) => string | null
   hydrateCacheFromDisk: () => Promise<void>
-  clearCache: () => void
+  clearWorkspaceSession: () => void
   purgeEntireStudioDatabase: () => Promise<void>
 }
 
@@ -43,7 +43,6 @@ export const useModStore = create<ModStoreState>()(
         try {
           const storedRecords = await assetDb.getAllFiles()
 
-          // Pre-generate stable object URLs for every persisted file
           const rehydratedUrlCache: Record<string, string> = {}
           Object.entries(storedRecords).forEach(([key, binary]) => {
             rehydratedUrlCache[key] = URL.createObjectURL(binary)
@@ -56,11 +55,10 @@ export const useModStore = create<ModStoreState>()(
           })
 
           console.log(
-            `[Store:hydrateCacheFromDisk] Rehydrated ${Object.keys(storedRecords).length} mod resources from IndexedDB.`
+            `[Store:hydrateCacheFromDisk] Rehydrated ${Object.keys(storedRecords).length} assets from IndexedDB.`
           )
         } catch (err) {
           console.error('[Store:hydrateCacheFromDisk] Rehydration error:', err)
-          // Set true anyway to prevent permanent UI deadlock on fault
           set({ hasHydratedDisk: true })
         }
       },
@@ -179,7 +177,6 @@ export const useModStore = create<ModStoreState>()(
               ? (updatedItems[0]?.id ?? null)
               : state.selectedItemId
 
-          // Revoke object URLs and clean IndexedDB for deleted item's assets
           const freshUrlCache = { ...state.stringUrlCache }
 
           if (itemToDelete?.thumbnailKey) {
@@ -223,11 +220,9 @@ export const useModStore = create<ModStoreState>()(
       getBlobUrlFromCache: (key) => {
         if (!key || key === 'PROJECT_COVER_MASTER') return null
 
-        // 1. Return already-generated stable URL for this session
         const existingUrl = get().stringUrlCache[key]
         if (existingUrl) return existingUrl
 
-        // 2. Generate and cache URL from in-memory binary
         const cachedBinary = get().binaryFileCache[key]
         if (cachedBinary) {
           const freshUrl = URL.createObjectURL(cachedBinary)
@@ -237,13 +232,12 @@ export const useModStore = create<ModStoreState>()(
           return freshUrl
         }
 
-        // 3. Async recovery from IndexedDB if not in memory yet
         assetDb.getFile(key).then((dbFile) => {
           if (dbFile) {
             const recoveryUrl = URL.createObjectURL(dbFile)
             set((state) => ({
               binaryFileCache: { ...state.binaryFileCache, [key]: dbFile },
-              stringUrlCache: { ...state.stringUrlCache, [key]: recoveryUrl },
+              stringUrlCache:  { ...state.stringUrlCache,  [key]: recoveryUrl },
             }))
           }
         }).catch((err) => {
@@ -254,13 +248,15 @@ export const useModStore = create<ModStoreState>()(
       },
 
       // ── Workspace reset ──────────────────────────────────────────────────
-      clearCache: () => {
+      // Only clears in-memory volatile state (selected item pointer).
+      // currentProject is intentionally kept in localStorage so refresh
+      // from any route restores the user's last open project automatically.
+      clearWorkspaceSession: () => {
         set({ currentProject: null, selectedItemId: null })
       },
 
       purgeEntireStudioDatabase: async () => {
         try {
-          // Revoke all open object URL references before clearing storage
           Object.values(get().stringUrlCache).forEach((url) => URL.revokeObjectURL(url))
           await assetDb.clearAll()
 
@@ -280,15 +276,22 @@ export const useModStore = create<ModStoreState>()(
     }),
     {
       name: 'paralives-studio-storage',
-      // Merge persisted data onto current state; volatile caches are always reset on boot
+      // Persist project state fully — currentProject and selectedItemId are
+      // needed to restore the workspace on page refresh without any lookup.
+      // Asset caches are always volatile; they're rebuilt from IndexedDB on boot.
+      partialize: (state) => ({
+        recentProjects: state.recentProjects,
+        currentProject: state.currentProject,
+        selectedItemId: state.selectedItemId,
+      }),
       merge: (persistedState: any, currentState) => ({
         ...currentState,
         ...persistedState,
-        binaryFileCache: currentState.binaryFileCache,
-        stringUrlCache:  currentState.stringUrlCache,
+        // Always reset volatile caches — they're rebuilt from IndexedDB on boot
+        binaryFileCache: {},
+        stringUrlCache: {},
+        hasHydratedDisk: false,
       }),
-      // Only persist project history; asset caches are rebuilt from IndexedDB on boot
-      partialize: (state) => ({ recentProjects: state.recentProjects }),
     }
   )
 )

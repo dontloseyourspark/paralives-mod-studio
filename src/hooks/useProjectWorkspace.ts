@@ -6,17 +6,32 @@ import type { Item } from '../types/types'
 /**
  * All workspace logic for the project editor screen.
  *
- * This hook owns:
- *   - Deep-link rehydration (cold boot via URL projectId)
- *   - Derived state (activeSelectedItem)
- *   - Action handlers (add, delete, save, back)
+ * Persistence strategy:
+ *   currentProject and selectedItemId are persisted directly to localStorage
+ *   by the store, so on page refresh they're available immediately after the
+ *   Zustand persist middleware finishes loading (Phase 1 of App.tsx boot).
+ *   No lookup through recentProjects is needed.
  *
- * It returns pure data + callbacks. Zero JSX.
- * UI components should not contain any of this logic.
+ * This hook only needs to:
+ *   1. Wait for the persist middleware to finish (storeReady gate)
+ *   2. Verify the URL projectId matches the restored currentProject
+ *   3. Redirect to '/' if there's genuinely nothing to show
  */
 export function useProjectWorkspace() {
   const navigate = useNavigate()
   const { projectId } = useParams<{ projectId: string }>()
+
+  // ── Zustand persist hydration gate ────────────────────────────────────────
+  // Wait for localStorage restore to complete before acting on store state.
+  const [storeReady, setStoreReady] = useState(
+    () => useModStore.persist.hasHydrated()
+  )
+
+  useEffect(() => {
+    if (storeReady) return
+    const unsub = useModStore.persist.onFinishHydration(() => setStoreReady(true))
+    return unsub
+  }, [storeReady])
 
   // ── Store reads ────────────────────────────────────────────────────────────
   const currentProject  = useModStore((s) => s.currentProject)
@@ -24,51 +39,64 @@ export function useProjectWorkspace() {
   const selectedItemId  = useModStore((s) => s.selectedItemId)
 
   // ── Store mutations ────────────────────────────────────────────────────────
-  const setProject        = useModStore((s) => s.setProject)
-  const setSelectedItemId = useModStore((s) => s.setSelectedItemId)
-  const updateProject     = useModStore((s) => s.updateProject)
-  const saveProject       = useModStore((s) => s.saveProject)
-  const clearCache        = useModStore((s) => s.clearCache)
-  const addItemWith       = useModStore((s) => s.addItemWith)
-  const updateItem        = useModStore((s) => s.updateItem)
-  const deleteItem        = useModStore((s) => s.deleteItem)
+  const setProject            = useModStore((s) => s.setProject)
+  const setSelectedItemId     = useModStore((s) => s.setSelectedItemId)
+  const updateProject         = useModStore((s) => s.updateProject)
+  const saveProject           = useModStore((s) => s.saveProject)
+  const clearWorkspaceSession = useModStore((s) => s.clearWorkspaceSession)
+  const addItemWith           = useModStore((s) => s.addItemWith)
+  const updateItem            = useModStore((s) => s.updateItem)
+  const deleteItem            = useModStore((s) => s.deleteItem)
 
-  // ── Local UI state ─────────────────────────────────────────────────────────
-  const [isSaving, setIsSaving] = useState(false)
-  // Blocks premature "no project" fallback screens during async rehydration
-  const [isRehydrating, setIsRehydrating] = useState(true)
-
-  // ── Deep-link rehydration ──────────────────────────────────────────────────
-  // When the user navigates directly to /project/:id (cold boot, page refresh,
-  // or shared link), the Zustand store may not have currentProject loaded yet.
-  // We locate the matching record from persisted recentProjects and restore it.
+  // ── Project validation after store is ready ────────────────────────────────
+  // currentProject is persisted directly, so it's restored automatically.
+  // We just need to handle the edge case where the URL id doesn't match
+  // (e.g. user manually edited the URL, or navigated to a stale link).
   useEffect(() => {
-    if (!currentProject && projectId && recentProjects.length > 0) {
-      const match = recentProjects.find((p) => p.id === projectId)
+    if (!storeReady) return
 
+    if (!currentProject) {
+      // Nothing persisted — try to recover from recentProjects by URL id
+      if (projectId && recentProjects.length > 0) {
+        const match = recentProjects.find((p) => p.id === projectId)
+        if (match) {
+          setProject(match)
+          if (match.items?.length > 0) setSelectedItemId(match.items[0].id)
+          return
+        }
+      }
+      // Genuinely nothing found — redirect home
+      console.warn('[useProjectWorkspace] No project to restore, redirecting home.')
+      navigate('/')
+      return
+    }
+
+    // Project is loaded — verify the URL id matches (catches stale URL edge case)
+    if (projectId && currentProject.id !== projectId) {
+      const match = recentProjects.find((p) => p.id === projectId)
       if (match) {
         setProject(match)
-        // Auto-select the first item so the editor panel isn't empty on load
-        if (match.items && match.items.length > 0) {
-          setSelectedItemId(match.items[0].id)
-        }
+        if (match.items?.length > 0) setSelectedItemId(match.items[0].id)
       } else {
-        // Unknown project ID — redirect home rather than showing a broken state
-        console.error(`[useProjectWorkspace] No project found for ID: ${projectId}`)
+        console.warn('[useProjectWorkspace] URL projectId not found, redirecting home.')
         navigate('/')
       }
     }
-    setIsRehydrating(false)
-  }, [projectId, currentProject, recentProjects, setProject, setSelectedItemId, navigate])
+  }, [storeReady, currentProject, projectId, recentProjects, setProject, setSelectedItemId, navigate])
+
+  // ── Loading state ──────────────────────────────────────────────────────────
+  const isRehydrating = !storeReady
 
   // ── Derived state ──────────────────────────────────────────────────────────
   const activeSelectedItem =
     currentProject?.items.find((i) => i.id === selectedItemId) ?? null
 
   // ── Action handlers ────────────────────────────────────────────────────────
+  const [isSaving, setIsSaving] = useState(false)
+
   const handleBackToDashboard = () => {
-    // Soft reset: clears workspace pointers without touching IndexedDB
-    clearCache()
+    // Clear the active session pointers — persisted recentProjects stays intact
+    clearWorkspaceSession()
     navigate('/')
   }
 
@@ -94,32 +122,20 @@ export function useProjectWorkspace() {
     addItemWith(newItem)
   }
 
-  const handleDeleteItem = (itemId: string) => {
-    deleteItem(itemId)
-  }
-
-  const handleSelectItem = (item: Item) => {
-    setSelectedItemId(item.id)
-  }
+  const handleDeleteItem  = (itemId: string) => deleteItem(itemId)
+  const handleSelectItem  = (item: Item) => setSelectedItemId(item.id)
 
   return {
-    // State
     currentProject,
     selectedItemId,
     activeSelectedItem,
     isSaving,
     isRehydrating,
-
-    // Project-level mutations (passed directly to header inputs)
     updateProject,
-
-    // Item-level handlers
     handleAddNewItem,
     handleDeleteItem,
     handleSelectItem,
     updateItem,
-
-    // Project-level handlers
     handleSaveProject,
     handleBackToDashboard,
   }
