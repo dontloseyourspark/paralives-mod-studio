@@ -15,6 +15,7 @@ import WorkspaceCanvas from '../components/WorkspaceCanvas'
  *   - To change what "Add Item" does → edit useProjectWorkspace.ts
  *   - To change the header bar layout → edit WorkspaceHeader.tsx
  *   - To change the canvas / panel layout → edit WorkspaceCanvas.tsx
+ *   - To change the wizard flow → edit CreateModWizard.tsx
  * ─────────────────────────────────────────────────────────────────
  */
 export default function ProjectOverview() {
@@ -26,14 +27,13 @@ export default function ProjectOverview() {
     isRehydrating,
     updateProject,
     updateItem,
-    handleAddNewItem,
     handleDeleteItem,
     handleSelectItem,
+    handleWizardAdvancedEditing,
     handleSaveProject,
     handleBackToDashboard,
   } = useProjectWorkspace()
 
-  // Loading bridge while async store hydration finishes
   if (isRehydrating) {
     return (
       <div className="min-h-screen bg-[#0e1017] text-gray-500 flex items-center justify-center text-xs">
@@ -42,7 +42,6 @@ export default function ProjectOverview() {
     )
   }
 
-  // Fallback if no project was found after rehydration
   if (!currentProject) {
     return (
       <div className="min-h-screen bg-[#0e1017] text-gray-400 flex flex-col items-center justify-center gap-4">
@@ -72,9 +71,10 @@ export default function ProjectOverview() {
         selectedItemId={selectedItemId}
         activeSelectedItem={activeSelectedItem}
         onSelectItem={handleSelectItem}
-        onAddItem={handleAddNewItem}
+        onAddItem={() => {}}
         onDeleteItem={handleDeleteItem}
         onSaveItem={updateItem}
+        onWizardAdvancedEditing={handleWizardAdvancedEditing}
       />
     </div>
   )

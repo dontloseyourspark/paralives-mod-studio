@@ -125,6 +125,27 @@ export function useProjectWorkspace() {
   const handleDeleteItem  = (itemId: string) => deleteItem(itemId)
   const handleSelectItem  = (item: Item) => setSelectedItemId(item.id)
 
+  /**
+   * Called when the user finishes the wizard via "Advanced editing".
+   * Adds the partially-built item to the project and selects it so the
+   * full editor opens immediately.
+   */
+  const handleWizardAdvancedEditing = (partial: Partial<Item>) => {
+    const newItem: Item = {
+      id:   partial.id   ?? crypto.randomUUID(),
+      guid: partial.guid ?? crypto.randomUUID(),
+      name: partial.name ?? 'New Mod Item',
+      description: partial.description ?? '',
+      price: partial.price ?? 0,
+      tags:  partial.tags  ?? [],
+      thumbnailKey: partial.thumbnailKey ?? null,
+      textureKeys:  partial.textureKeys  ?? {},
+      componentBlueprints: partial.componentBlueprints ?? { rootDefaultStates: [], materialSurfaces: [] },
+      components: partial.components ?? [],
+    }
+    addItemWith(newItem)
+  }
+
   return {
     currentProject,
     selectedItemId,
@@ -135,6 +156,7 @@ export function useProjectWorkspace() {
     handleAddNewItem,
     handleDeleteItem,
     handleSelectItem,
+    handleWizardAdvancedEditing,
     updateItem,
     handleSaveProject,
     handleBackToDashboard,
