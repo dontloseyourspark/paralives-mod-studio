@@ -7,6 +7,7 @@ import { useModStore } from '../store/useModStore'
 import ModImporter from '../components/ModImporter'
 import CreateModWizard from '../components/CreateModWizard'
 import type { Item } from '../types/types'
+import englishReference from '../data/englishReference.json'
 
 export default function Dashboard() {
   const navigate        = useNavigate()
@@ -32,25 +33,49 @@ export default function Dashboard() {
 
   // Wizard finished via "Advanced editing" or "Skip to advanced editing"
   // Create the project, optionally add the wizard item, then navigate
-  const handleWizardAdvanced = (partial: Partial<Item>) => {
+ // Find this function inside src/pages/Dashboard.tsx and replace it:
+
+  const handleWizardAdvanced = (payload: any) => {
     const project = createProject()
 
-    // Only add the item if the wizard produced meaningful content
-    const hasContent = partial.name && partial.name !== 'New Mod Item'
-    if (hasContent) {
-      const newItem: Item = {
-        id:   partial.id   ?? crypto.randomUUID(),
-        guid: partial.guid ?? crypto.randomUUID(),
-        name: partial.name ?? 'New Mod Item',
-        description: partial.description ?? '',
-        price: partial.price ?? 0,
-        tags:  partial.tags  ?? [],
-        thumbnailKey: partial.thumbnailKey ?? null,
-        textureKeys:  partial.textureKeys  ?? {},
-        componentBlueprints: partial.componentBlueprints ?? { rootDefaultStates: [], materialSurfaces: [] },
-        components: partial.components ?? [],
+    if (payload && payload.isTranslation) {
+      // Auto-populate all known English GUIDs with empty strings
+      const initialStrings: Record<string, string> = {}
+      Object.keys(englishReference).forEach((guid) => {
+        initialStrings[guid] = ''
+      })
+
+      const newTranslation = { 
+        language: payload.language || 'Unknown', 
+        strings: initialStrings 
       }
-      addItemWith(newItem)
+      
+      const updatedProject = {
+        ...project,
+        name: `${payload.language} Translation`, 
+        translations: [newTranslation],
+        updatedAt: new Date().toISOString()
+      }
+      setProject(updatedProject)
+    } else {
+      // Normal Item flow
+      const partial = payload as Partial<Item>
+      const hasContent = partial.name && partial.name !== 'New Mod Item'
+      if (hasContent) {
+        const newItem: Item = {
+          id:   partial.id   ?? crypto.randomUUID(),
+          guid: partial.guid ?? crypto.randomUUID(),
+          name: partial.name ?? 'New Mod Item',
+          description: partial.description ?? '',
+          price: partial.price ?? 0,
+          tags:  partial.tags  ?? [],
+          thumbnailKey: partial.thumbnailKey ?? null,
+          textureKeys:  partial.textureKeys  ?? {},
+          componentBlueprints: partial.componentBlueprints ?? { rootDefaultStates: [], materialSurfaces: [] },
+          components: partial.components ?? [],
+        }
+        addItemWith(newItem)
+      }
     }
 
     setWizardOpen(false)
@@ -90,7 +115,7 @@ export default function Dashboard() {
       {/* Warning Callout */}
       <section className="flex items-center gap-3 bg-amber-500/10 border border-amber-500/20 px-4 py-3 rounded-2xl text-amber-200 text-sm font-medium select-none">
         <WarningCircle size={22} className="text-amber-500 shrink-0" />
-        <span>Only items are supported at this moment. Other mod-focused features will be added soon.</span>
+        <span>Only limited mod types are supported at this moment. Other mod-focused features will be added soon.</span>
       </section>
 
       {/* Primary Actions */}

@@ -6,6 +6,11 @@ export interface ComponentNode {
   properties: Record<string, any>
 }
 
+export interface TranslationData {
+  language: string;
+  strings: Record<string, string>;
+}
+
 export interface Item {
   id: string
   guid: string
@@ -13,11 +18,8 @@ export interface Item {
   description: string
   price: number
   tags: string[]
-  
-  // Persistent asset registry cache markers
   thumbnailKey: string | null
   textureKeys: Record<string, string>
-  
   componentBlueprints: {
     rootDefaultStates: string[]
     materialSurfaces: string[]
@@ -31,12 +33,10 @@ export interface ModProject {
   description: string
   version: string
   author: string
-  
-  // Master workshop cover illustration lookup link
   coverThumbnailKey: string | null
-  
   items: Item[]
   assets: any[]
+  translations?: TranslationData[] // Added translation array
   createdAt: string
   updatedAt: string
 }

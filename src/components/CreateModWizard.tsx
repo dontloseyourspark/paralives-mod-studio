@@ -1,19 +1,21 @@
+// src/components/CreateModWizard.tsx
 import { useState, useRef, useCallback } from 'react'
 import {
   X, ArrowLeft, ArrowRight, Check,
   PaintBucket, Armchair, CloudArrowUp,
-  Download, Sliders, Eye, File,
+  Download, Sliders, Eye, File, Translate
 } from 'phosphor-react'
 import { useModStore } from '../store/useModStore'
 import type { Item } from '../types/types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type ModType = 'wall_paint' | 'furniture'
+type ModType = 'wall_paint' | 'furniture' | 'translation'
 
 interface WizardState {
   modType: ModType | null
   modName: string
+  language: string
   meshFile: File | null
   textureFiles: File[]
 }
@@ -21,9 +23,7 @@ interface WizardState {
 interface Props {
   isOpen: boolean
   onClose: () => void
-  /** Called when the user finishes the wizard normally (not advanced editing) */
   onComplete?: (item: Item) => void
-  /** Called when the user skips to advanced editing */
   onAdvancedEditing?: (partial: Partial<Item>) => void
 }
 
@@ -43,6 +43,13 @@ const MOD_TYPES = [
     description: 'Design a new piece of furniture for players to place in their builds.',
     tags: ['Object', 'Placeable', 'Build Mode'],
     icon: Armchair,
+  },
+  {
+    id: 'translation' as ModType,
+    label: 'Translation',
+    description: 'Translate the game or a mod into a different language.',
+    tags: ['Language', 'Text', 'Localization'],
+    icon: Translate,
   },
 ]
 
@@ -175,13 +182,16 @@ function DropZone({
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function CreateModWizard({ isOpen, onClose, onComplete, onAdvancedEditing }: Props) {
-  const addItemWith        = useModStore((s) => s.addItemWith)
+  const currentProject = useModStore((s) => s.currentProject)
+  const updateProject = useModStore((s) => s.updateProject)
+  const addItemWith = useModStore((s) => s.addItemWith)
   const registerFileInCache = useModStore((s) => s.registerFileInCache)
 
   const [step, setStep] = useState(0)
   const [state, setState] = useState<WizardState>({
     modType: null,
     modName: '',
+    language: '',
     meshFile: null,
     textureFiles: [],
   })
@@ -193,7 +203,9 @@ export default function CreateModWizard({ isOpen, onClose, onComplete, onAdvance
   const canAdvance = step === 0
     ? state.modType !== null
     : step === 1
-      ? state.modName.trim().length > 0
+      ? state.modType === 'translation' 
+          ? state.language.trim().length > 0 
+          : state.modName.trim().length > 0
       : true
 
   const goNext = () => { if (canAdvance && step < 2) setStep((s) => s + 1) }
@@ -201,7 +213,7 @@ export default function CreateModWizard({ isOpen, onClose, onComplete, onAdvance
 
   const handleClose = () => {
     setStep(0)
-    setState({ modType: null, modName: '', meshFile: null, textureFiles: [] })
+    setState({ modType: null, modName: '', language: '', meshFile: null, textureFiles: [] })
     onClose()
   }
 
@@ -236,6 +248,19 @@ export default function CreateModWizard({ isOpen, onClose, onComplete, onAdvance
   // ── Finish actions ─────────────────────────────────────────────────────────
 
   const handleDownload = () => {
+    if (state.modType === 'translation') {
+      const translationText = "#Setting.Translations\n =Items\n"
+      const blob = new Blob([translationText], { type: 'text/plain' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `Translations.setting`
+      a.click()
+      URL.revokeObjectURL(url)
+      handleClose()
+      return
+    }
+
     const item = buildPartialItem() as Item
     addItemWith(item)
     const blob = new Blob([JSON.stringify(item, null, 2)], { type: 'application/json' })
@@ -250,6 +275,16 @@ export default function CreateModWizard({ isOpen, onClose, onComplete, onAdvance
   }
 
   const handleAdvancedEditing = () => {
+    if (state.modType === 'translation') {
+      // Pass a special payload so the parent (Dashboard) can create the project & navigate
+      onAdvancedEditing?.({ 
+        isTranslation: true, 
+        language: state.language.trim() 
+      } as any)
+      handleClose()
+      return
+    }
+
     const partial = buildPartialItem()
     onAdvancedEditing?.(partial)
     handleClose()
@@ -280,7 +315,7 @@ export default function CreateModWizard({ isOpen, onClose, onComplete, onAdvance
         <p className="text-sm text-gray-500 mt-2 m-0">Choose the type of content you want to create.</p>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         {MOD_TYPES.map(({ id, label, description, tags, icon: Icon }) => {
           const selected = state.modType === id
           return (
@@ -312,7 +347,6 @@ export default function CreateModWizard({ isOpen, onClose, onComplete, onAdvance
         })}
       </div>
 
-      {/* Skip to advanced */}
       <div className="text-center">
         <button
           onClick={handleSkipToAdvanced}
@@ -324,53 +358,130 @@ export default function CreateModWizard({ isOpen, onClose, onComplete, onAdvance
     </div>
   )
 
-  const renderStep1 = () => (
-    <div className="flex flex-col gap-6 animate-in fade-in slide-in-from-bottom-3 duration-200">
-      <div className="text-center">
-        <h2 className="text-2xl font-bold text-white m-0">Upload assets</h2>
-        <p className="text-sm text-gray-500 mt-2 m-0">Provide your 3D mesh and texture files.</p>
-      </div>
+  const renderStep1 = () => {
+    if (state.modType === 'translation') {
+      return (
+        <div className="flex flex-col gap-6 animate-in fade-in slide-in-from-bottom-3 duration-200">
+          <div className="text-center">
+            <h2 className="text-2xl font-bold text-white m-0">Language Details</h2>
+            <p className="text-sm text-gray-500 mt-2 m-0">What language are you translating to?</p>
+          </div>
 
-      <div className="flex flex-col gap-5">
-        {/* Mod name */}
-        <div className="flex flex-col gap-2">
-          <label className="text-xs font-bold uppercase tracking-wider text-gray-400">
-            Mod name <span className="text-[#8b5cf6]">*</span>
-          </label>
-          <input
-            autoFocus
-            type="text"
-            value={state.modName}
-            onChange={(e) => setState((s) => ({ ...s, modName: e.target.value }))}
-            placeholder="e.g. Cozy Oak Chair"
-            className="w-full bg-white/3 border border-white/8 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-600 outline-none focus:border-[#8b5cf6]/50 focus:bg-[#8b5cf6]/4 transition-all duration-150"
-          />
+          <div className="flex flex-col gap-5">
+            <div className="flex flex-col gap-2">
+              <label className="text-xs font-bold uppercase tracking-wider text-gray-400">
+                Language Name <span className="text-[#8b5cf6]">*</span>
+              </label>
+              <input
+                autoFocus
+                type="text"
+                value={state.language}
+                onChange={(e) => setState((s) => ({ ...s, language: e.target.value }))}
+                placeholder="e.g. German, Spanish, French"
+                className="w-full bg-white/3 border border-white/8 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-600 outline-none focus:border-[#8b5cf6]/50 focus:bg-[#8b5cf6]/4 transition-all duration-150"
+              />
+            </div>
+          </div>
+        </div>
+      )
+    }
+
+    return (
+      <div className="flex flex-col gap-6 animate-in fade-in slide-in-from-bottom-3 duration-200">
+        <div className="text-center">
+          <h2 className="text-2xl font-bold text-white m-0">Upload assets</h2>
+          <p className="text-sm text-gray-500 mt-2 m-0">Provide your 3D mesh and texture files.</p>
         </div>
 
-        <DropZone
-          label="3D Mesh"
-          hint="Drop your .obj, .fbx, .glb, or .gltf file here"
-          accept=".obj,.fbx,.glb,.gltf"
-          files={state.meshFile ? [state.meshFile] : []}
-          icon={CloudArrowUp}
-          onFiles={([f]) => setState((s) => ({ ...s, meshFile: f ?? null }))}
-        />
+        <div className="flex flex-col gap-5">
+          <div className="flex flex-col gap-2">
+            <label className="text-xs font-bold uppercase tracking-wider text-gray-400">
+              Mod name <span className="text-[#8b5cf6]">*</span>
+            </label>
+            <input
+              autoFocus
+              type="text"
+              value={state.modName}
+              onChange={(e) => setState((s) => ({ ...s, modName: e.target.value }))}
+              placeholder="e.g. Cozy Oak Chair"
+              className="w-full bg-white/3 border border-white/8 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-600 outline-none focus:border-[#8b5cf6]/50 focus:bg-[#8b5cf6]/4 transition-all duration-150"
+            />
+          </div>
 
-        <DropZone
-          label="Textures"
-          hint="Drop texture images here (PNG, JPG, TGA…)"
-          accept=".png,.jpg,.jpeg,.tga,.webp"
-          multiple
-          files={state.textureFiles}
-          icon={CloudArrowUp}
-          onFiles={(files) => setState((s) => ({ ...s, textureFiles: files }))}
-        />
+          <DropZone
+            label="3D Mesh"
+            hint="Drop your .obj, .fbx, .glb, or .gltf file here"
+            accept=".obj,.fbx,.glb,.gltf"
+            files={state.meshFile ? [state.meshFile] : []}
+            icon={CloudArrowUp}
+            onFiles={([f]) => setState((s) => ({ ...s, meshFile: f ?? null }))}
+          />
+
+          <DropZone
+            label="Textures"
+            hint="Drop texture images here (PNG, JPG, TGA…)"
+            accept=".png,.jpg,.jpeg,.tga,.webp"
+            multiple
+            files={state.textureFiles}
+            icon={CloudArrowUp}
+            onFiles={(files) => setState((s) => ({ ...s, textureFiles: files }))}
+          />
+        </div>
       </div>
-    </div>
-  )
+    )
+  }
 
   const renderStep2 = () => {
     const selectedType = MOD_TYPES.find((t) => t.id === state.modType)
+
+    if (state.modType === 'translation') {
+      return (
+        <div className="flex flex-col gap-6 animate-in fade-in slide-in-from-bottom-3 duration-200">
+          <div className="text-center">
+            <h2 className="text-2xl font-bold text-white m-0">Preview &amp; export</h2>
+            <p className="text-sm text-gray-500 mt-2 m-0">Review your translation mod before proceeding.</p>
+          </div>
+
+          <div className="w-full h-48 rounded-2xl border border-white/6 bg-white/2 flex flex-col items-center justify-center gap-2">
+            <Translate size={28} className="text-[#8b5cf6]" weight="light" />
+            <span className="text-xs text-gray-400">Translation to {state.language || 'Unknown Language'}</span>
+          </div>
+
+          <div className="rounded-2xl border border-white/6 bg-white/2 overflow-hidden">
+            {[
+              ['Mod type', selectedType?.label ?? '—'],
+              ['Language', state.language.trim() || '—'],
+            ].map(([key, val], i, arr) => (
+              <div
+                key={key}
+                className={`flex items-center justify-between px-4 py-3 text-sm ${i < arr.length - 1 ? 'border-b border-white/4' : ''}`}
+              >
+                <span className="text-gray-500 font-medium">{key}</span>
+                <span className="text-gray-300 font-medium">{val}</span>
+              </div>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              onClick={handleDownload}
+              className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-white/5 hover:bg-white/8 border border-white/8 hover:border-white/14 text-sm font-semibold text-gray-300 hover:text-white cursor-pointer transition-all duration-150 outline-none"
+            >
+              <Download size={15} weight="bold" />
+              Download template
+            </button>
+            <button
+              onClick={handleAdvancedEditing}
+              className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-[#8b5cf6] hover:bg-[#7c3aed] text-sm font-semibold text-white cursor-pointer transition-all duration-150 outline-none border-none shadow-lg shadow-[#8b5cf6]/20"
+            >
+              <Sliders size={15} weight="bold" />
+              Advanced editing
+            </button>
+          </div>
+        </div>
+      )
+    }
+
     return (
       <div className="flex flex-col gap-6 animate-in fade-in slide-in-from-bottom-3 duration-200">
         <div className="text-center">
@@ -378,13 +489,11 @@ export default function CreateModWizard({ isOpen, onClose, onComplete, onAdvance
           <p className="text-sm text-gray-500 mt-2 m-0">Review your mod before downloading or editing further.</p>
         </div>
 
-        {/* 3D preview placeholder */}
         <div className="w-full h-48 rounded-2xl border border-white/6 bg-white/2 flex flex-col items-center justify-center gap-2">
           <Eye size={28} className="text-gray-600" weight="light" />
           <span className="text-xs text-gray-600">3D preview not available in browser</span>
         </div>
 
-        {/* Summary */}
         <div className="rounded-2xl border border-white/6 bg-white/2 overflow-hidden">
           {[
             ['Mod name', state.modName.trim() || '—'],
@@ -402,7 +511,6 @@ export default function CreateModWizard({ isOpen, onClose, onComplete, onAdvance
           ))}
         </div>
 
-        {/* Action buttons */}
         <div className="grid grid-cols-2 gap-3">
           <button
             onClick={handleDownload}
@@ -429,7 +537,6 @@ export default function CreateModWizard({ isOpen, onClose, onComplete, onAdvance
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-150">
       <div className="w-full max-w-xl bg-[#0e1017] border border-white/6 rounded-3xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
 
-        {/* Top bar */}
         <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-white/5">
           <div className="flex items-center gap-3 text-sm text-gray-400">
             <span className="text-gray-500 font-medium">New Mod</span>
@@ -443,53 +550,47 @@ export default function CreateModWizard({ isOpen, onClose, onComplete, onAdvance
           </button>
         </div>
 
-        {/* Step indicator */}
         <div className="px-6 pt-6 pb-2">
           <StepIndicator current={step} />
         </div>
 
-        {/* Step content */}
         <div className="px-6 py-5 overflow-y-auto max-h-[70vh]">
           {step === 0 && renderStep0()}
           {step === 1 && renderStep1()}
           {step === 2 && renderStep2()}
         </div>
 
-        {/* Footer nav — only steps 0 and 1 need Continue */}
-       
-          <div className="flex justify-between px-6 pb-5 pt-2 border-t border-white/5">
-             {step > 0 ? (
-              <button
-                onClick={goBack}
-                className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-white/5 hover:bg-white/8 border border-white/8 hover:border-white/14 text-sm font-semibold text-gray-300 hover:text-white cursor-pointer transition-all duration-150 outline-none"
-              >
-               
-                Back
-              </button>
-            ) : (
-              <button
-                onClick={handleClose}
-                className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-white/5 hover:bg-white/8 border border-white/8 hover:border-white/14 text-sm font-semibold text-gray-300 hover:text-white cursor-pointer transition-all duration-150 outline-none"
-              >
-                
-                Cancel
-              </button>
-            )}
-            {step < 2 && (
+        <div className="flex justify-between px-6 pb-5 pt-2 border-t border-white/5">
+           {step > 0 ? (
             <button
-              onClick={goNext}
-              disabled={!canAdvance}
-              className={`
-                flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold cursor-pointer outline-none border-none transition-all duration-150
-                ${canAdvance
-                  ? 'bg-[#8b5cf6] hover:bg-[#7c3aed] text-white shadow-md shadow-[#8b5cf6]/25'
-                  : 'bg-white/5 text-gray-600 cursor-not-allowed'
-                }
-              `}
+              onClick={goBack}
+              className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-white/5 hover:bg-white/8 border border-white/8 hover:border-white/14 text-sm font-semibold text-gray-300 hover:text-white cursor-pointer transition-all duration-150 outline-none"
             >
-              Continue
-              <ArrowRight size={14} weight="bold" />
+              Back
             </button>
+          ) : (
+            <button
+              onClick={handleClose}
+              className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-white/5 hover:bg-white/8 border border-white/8 hover:border-white/14 text-sm font-semibold text-gray-300 hover:text-white cursor-pointer transition-all duration-150 outline-none"
+            >
+              Cancel
+            </button>
+          )}
+          {step < 2 && (
+          <button
+            onClick={goNext}
+            disabled={!canAdvance}
+            className={`
+              flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold cursor-pointer outline-none border-none transition-all duration-150
+              ${canAdvance
+                ? 'bg-[#8b5cf6] hover:bg-[#7c3aed] text-white shadow-md shadow-[#8b5cf6]/25'
+                : 'bg-white/5 text-gray-600 cursor-not-allowed'
+              }
+            `}
+          >
+            Continue
+            <ArrowRight size={14} weight="bold" />
+          </button>
         )}
         </div>
       </div>

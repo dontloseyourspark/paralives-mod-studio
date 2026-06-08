@@ -67,6 +67,7 @@ export default function ProjectOverview() {
       />
 
       <WorkspaceCanvas
+        project={currentProject} // <--- ADD THIS LINE
         items={currentProject.items}
         selectedItemId={selectedItemId}
         activeSelectedItem={activeSelectedItem}

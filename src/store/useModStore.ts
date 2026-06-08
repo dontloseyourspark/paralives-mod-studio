@@ -1,7 +1,8 @@
+// src/store/useModStore.ts
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { assetDb } from '../utils/assetDb'
-import type { ModProject, Item } from '../types/types'
+import type { ModProject, Item, TranslationData } from '../types/types'
 
 interface ModStoreState {
   currentProject: ModProject | null
@@ -10,7 +11,6 @@ interface ModStoreState {
   binaryFileCache: Record<string, File | Blob>
   stringUrlCache: Record<string, string>
 
-  /** Becomes true once IndexedDB asset rehydration has completed on boot. */
   hasHydratedDisk: boolean
 
   setProject: (project: ModProject) => void
@@ -21,6 +21,7 @@ interface ModStoreState {
   addItemWith: (item: Item) => void
   updateItem: (updatedItem: Item) => void
   deleteItem: (itemId: string) => void
+  updateTranslationString: (lang: string, key: string, value: string) => void
   registerFileInCache: (key: string, file: File | Blob) => void
   getBlobUrlFromCache: (key: string | null) => string | null
   hydrateCacheFromDisk: () => Promise<void>
@@ -38,11 +39,9 @@ export const useModStore = create<ModStoreState>()(
       stringUrlCache: {},
       hasHydratedDisk: false,
 
-      // ── Boot: rebuild volatile URL cache from IndexedDB ──────────────────
       hydrateCacheFromDisk: async () => {
         try {
           const storedRecords = await assetDb.getAllFiles()
-
           const rehydratedUrlCache: Record<string, string> = {}
           Object.entries(storedRecords).forEach(([key, binary]) => {
             rehydratedUrlCache[key] = URL.createObjectURL(binary)
@@ -53,17 +52,12 @@ export const useModStore = create<ModStoreState>()(
             stringUrlCache: rehydratedUrlCache,
             hasHydratedDisk: true,
           })
-
-          console.log(
-            `[Store:hydrateCacheFromDisk] Rehydrated ${Object.keys(storedRecords).length} assets from IndexedDB.`
-          )
         } catch (err) {
           console.error('[Store:hydrateCacheFromDisk] Rehydration error:', err)
           set({ hasHydratedDisk: true })
         }
       },
 
-      // ── Project management ───────────────────────────────────────────────
       setProject: (project) =>
         set((state) => {
           const exists = state.recentProjects.some((p) => p.id === project.id)
@@ -85,6 +79,7 @@ export const useModStore = create<ModStoreState>()(
           coverThumbnailKey: null,
           items: [],
           assets: [],
+          translations: [],
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         }
@@ -119,7 +114,6 @@ export const useModStore = create<ModStoreState>()(
         })
       },
 
-      // ── Item management ──────────────────────────────────────────────────
       addItemWith: (newItem) =>
         set((state) => {
           if (!state.currentProject) return state
@@ -207,7 +201,32 @@ export const useModStore = create<ModStoreState>()(
           }
         }),
 
-      // ── Asset cache ──────────────────────────────────────────────────────
+      updateTranslationString: (lang, key, value) =>
+        set((state) => {
+          if (!state.currentProject || !state.currentProject.translations) return state
+
+          const updatedTranslations = state.currentProject.translations.map((t) => {
+            if (t.language !== lang) return t
+            return {
+              ...t,
+              strings: { ...t.strings, [key]: value },
+            }
+          })
+
+          const updatedProject = {
+            ...state.currentProject,
+            translations: updatedTranslations,
+            updatedAt: new Date().toISOString(),
+          }
+
+          return {
+            currentProject: updatedProject,
+            recentProjects: state.recentProjects.map((p) =>
+              p.id === updatedProject.id ? updatedProject : p
+            ),
+          }
+        }),
+
       registerFileInCache: (key, file) => {
         assetDb.saveFile(key, file).catch((err) =>
           console.error(`[Store:registerFileInCache] IndexedDB write failure: ${key}`, err)
@@ -247,10 +266,6 @@ export const useModStore = create<ModStoreState>()(
         return null
       },
 
-      // ── Workspace reset ──────────────────────────────────────────────────
-      // Only clears in-memory volatile state (selected item pointer).
-      // currentProject is intentionally kept in localStorage so refresh
-      // from any route restores the user's last open project automatically.
       clearWorkspaceSession: () => {
         set({ currentProject: null, selectedItemId: null })
       },
@@ -267,8 +282,6 @@ export const useModStore = create<ModStoreState>()(
             selectedItemId: null,
             recentProjects: [],
           })
-
-          console.log('[Store:purgeEntireStudioDatabase] Persistent storage cleared cleanly.')
         } catch (err) {
           console.error('[Store:purgeEntireStudioDatabase] Hard disk clear failed:', err)
         }
@@ -276,9 +289,6 @@ export const useModStore = create<ModStoreState>()(
     }),
     {
       name: 'paralives-studio-storage',
-      // Persist project state fully — currentProject and selectedItemId are
-      // needed to restore the workspace on page refresh without any lookup.
-      // Asset caches are always volatile; they're rebuilt from IndexedDB on boot.
       partialize: (state) => ({
         recentProjects: state.recentProjects,
         currentProject: state.currentProject,
@@ -287,7 +297,6 @@ export const useModStore = create<ModStoreState>()(
       merge: (persistedState: any, currentState) => ({
         ...currentState,
         ...persistedState,
-        // Always reset volatile caches — they're rebuilt from IndexedDB on boot
         binaryFileCache: {},
         stringUrlCache: {},
         hasHydratedDisk: false,

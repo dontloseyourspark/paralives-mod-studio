@@ -1,7 +1,9 @@
+// src/components/ModImporter.tsx
 import React, { useState } from 'react'
 import { Folder, UploadSimple } from 'phosphor-react'
+import JSZip from 'jszip'
 import { useModStore } from '../store/useModStore'
-import type { ModProject } from '../types/types'
+import type { ModProject, TranslationData } from '../types/types'
 
 interface ModImporterProps {
   onImportComplete: (project: ModProject) => void
@@ -14,6 +16,7 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
   const processFiles = async (fileList: FileList | File[]) => {
     let itemsSettingContent = ''
     let translationsSettingContent = ''
+    let detectedLanguageName = 'Unknown'
     
     const componentSettings: Record<string, string> = {}
     const prefabContents: Record<string, string> = {}
@@ -25,56 +28,94 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
     const textureKeys: Record<string, string> = {}
     let projectCoverKey: string | null = null
 
-    // Pass 1: Categorize file allocations from the directory selection tree
-    for (const file of Array.from(fileList)) {
-      const path = file.webkitRelativePath
-      const fileName = file.name
+    // 1. Normalize file inputs (handles both zip archives and unzipped directories)
+    const isArchive = fileList.length === 1 && (fileList[0].name.endsWith('.zip') || fileList[0].name.endsWith('.mod'))
+    
+    if (isArchive) {
+      detectedLanguageName = fileList[0].name.replace(/\.(zip|mod)$/i, '')
+    }
+
+    const fileEntries: { path: string, name: string, text: () => Promise<string>, getFile: () => Promise<File> }[] = []
+
+    if (isArchive) {
+      const zip = await JSZip.loadAsync(fileList[0])
+      for (const [relativePath, zipEntry] of Object.entries(zip.files)) {
+        if (zipEntry.dir) continue
+        
+        fileEntries.push({
+          path: relativePath,
+          name: zipEntry.name.split('/').pop() || '',
+          text: () => zipEntry.async('string'),
+          getFile: async () => {
+            const blob = await zipEntry.async('blob')
+            return new File([blob], zipEntry.name.split('/').pop() || '')
+          }
+        })
+      }
+    } else {
+      for (const file of Array.from(fileList)) {
+        if (!file.name) continue
+        fileEntries.push({
+          path: file.webkitRelativePath || file.name,
+          name: file.name,
+          text: async () => file.text(),
+          getFile: async () => file
+        })
+      }
+    }
+
+    // 2. Scan and categorize entries
+    for (const entry of fileEntries) {
+      const path = entry.path
+      const fileName = entry.name
+
+      const rootFolderMatch = path.match(/^([^/]+)\.mod\//i)
+      if (rootFolderMatch && detectedLanguageName === 'Unknown') {
+        detectedLanguageName = rootFolderMatch[1]
+      }
 
       if (path.endsWith('Items.setting')) {
-        itemsSettingContent = await file.text()
+        itemsSettingContent = await entry.text()
         continue
       }
       if (path.endsWith('Translations.setting')) {
-        translationsSettingContent = await file.text()
+        translationsSettingContent = await entry.text()
         continue
       }
       if (path.includes('/Settings/') && path.endsWith('.setting')) {
         const settingName = fileName.replace('.setting', '')
-        componentSettings[settingName] = await file.text()
+        componentSettings[settingName] = await entry.text()
         continue
       }
       if (path.includes('/Prefabs/') && path.endsWith('.prefab')) {
         const pName = fileName.replace('.prefab', '')
-        fileNameToTextMap[pName] = await file.text()
+        fileNameToTextMap[pName] = await entry.text()
         continue
       }
 
-      // Store catalog items thumbnails directly in binary cache map
       if (path.includes('/_GeneratedThumbnails/Items/') && path.endsWith('.png')) {
         const imageHash = fileName.replace('.png', '')
-        registerFileInCache(imageHash, file)
+        registerFileInCache(imageHash, await entry.getFile())
         thumbnailKeys.push(imageHash)
         continue
       }
 
-      // Store raw source textures binaries in binary cache map
       if (path.split('/').length === 2 && path.endsWith('.png')) {
         const textureKey = fileName.replace('.png', '')
-        registerFileInCache(textureKey, file)
+        registerFileInCache(textureKey, await entry.getFile())
         textureKeys[textureKey] = textureKey
         continue
       }
 
-      // Store master project cover illustration binary in cache map
       if (path.split('/').length === 2 && path.endsWith('.mod.thumbnail')) {
         const coverKey = 'PROJECT_COVER_MASTER'
-        registerFileInCache(coverKey, file)
+        registerFileInCache(coverKey, await entry.getFile())
         projectCoverKey = coverKey
         continue
       }
 
       if (path.endsWith('Prefabs.Metacache')) {
-        const cacheText = await file.text()
+        const cacheText = await entry.text()
         const blocks = cacheText.split('\n\n')
         
         blocks.forEach(block => {
@@ -99,19 +140,12 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
       }
     }
 
-    if (!itemsSettingContent) {
-      alert('Could not locate Items.setting inside the uploaded folder structure.')
+    if (!itemsSettingContent && !translationsSettingContent) {
+      alert('Could not locate Items.setting or Translations.setting.')
       return
     }
 
-    Object.keys(prefabGuidToNameMap).forEach((guid) => {
-      const name = prefabGuidToNameMap[guid]
-      if (fileNameToTextMap[name]) {
-        prefabContents[guid] = fileNameToTextMap[name]
-      }
-    })
-
-    // Core line splitter engine for the Paralives custom indentation format
+    // 3. Parsers
     const parseParalivesSetting = (text: string) => {
       const lines = text.split('\n')
       const itemsList: any[] = []
@@ -121,9 +155,7 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
         const line = rawLine.trim()
         
         if (line.startsWith('@')) {
-          if (currentItem && currentItem.guid) {
-            itemsList.push(currentItem)
-          }
+          if (currentItem && currentItem.guid) itemsList.push(currentItem)
           currentItem = { tags: [] }
         }
 
@@ -147,14 +179,10 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
         }
       })
 
-      if (currentItem && currentItem.guid) {
-        itemsList.push(currentItem)
-      }
-
+      if (currentItem && currentItem.guid) itemsList.push(currentItem)
       return itemsList
     }
 
-    // Specialized component graph graph parser
     const parsePrefabGraph = (text: string) => {
       const lines = text.split('\n')
       const components: any[] = []
@@ -166,11 +194,7 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
 
         if (line.endsWith(':') && !line.startsWith('=') && !line.startsWith('@') && !line.includes('(')) {
           if (currentComponent) components.push(currentComponent)
-          currentComponent = {
-            id: crypto.randomUUID(),
-            type: line.replace(':', ''),
-            properties: {}
-          }
+          currentComponent = { id: crypto.randomUUID(), type: line.replace(':', ''), properties: {} }
           return
         }
 
@@ -183,10 +207,7 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
             const pValue = cleanProp.substring(sepIndex + 1).trim()
             
             if (pValue.startsWith('(') && pValue.endsWith(')')) {
-              currentComponent.properties[pKey] = pValue
-                .replace(/[()]/g, '')
-                .split(',')
-                .map(num => parseFloat(num.trim()) || 0)
+              currentComponent.properties[pKey] = pValue.replace(/[()]/g, '').split(',').map(num => parseFloat(num.trim()) || 0)
             } else {
               currentComponent.properties[pKey] = isNaN(Number(pValue)) ? pValue : parseFloat(pValue)
             }
@@ -200,30 +221,36 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
 
     const extractAnchors = (text: string): string[] => {
       if (!text) return []
-      const lines = text.split('\n')
-      const guids: string[] = []
-      lines.forEach(l => {
-        const trimmed = l.trim()
-        if (trimmed.startsWith('=GUID:')) {
-          guids.push(trimmed.split(':')[1])
-        }
-      })
-      return guids
+      return text.split('\n').filter(l => l.trim().startsWith('=GUID:')).map(l => l.trim().split(':')[1])
     }
 
-    // Pass 2: Process metadata arrays and component fields
-    const itemsMeta = parseParalivesSetting(itemsSettingContent)
-    const translationsMeta = parseParalivesSetting(translationsSettingContent)
-    
+    const parseTranslations = (text: string): Record<string, string> => {
+      const translations: Record<string, string> = {}
+      const lines = text.split(/\r?\n/)
+      let currentKey: string | null = null
+
+      for (const line of lines) {
+        if (line.startsWith('  g')) {
+          currentKey = line.trim()
+        } else if (currentKey !== null && line.startsWith('   =Value:')) {
+          translations[currentKey] = line.substring(10)
+          currentKey = null
+        }
+      }
+      return translations
+    }
+
+    // 4. Object Synthesis
+    Object.keys(prefabGuidToNameMap).forEach((guid) => {
+      const name = prefabGuidToNameMap[guid]
+      if (fileNameToTextMap[name]) prefabContents[guid] = fileNameToTextMap[name]
+    })
+
+    const itemsMeta = itemsSettingContent ? parseParalivesSetting(itemsSettingContent) : []
     const rootStates = extractAnchors(componentSettings['ItemObjectRoot'] || '')
     const meshSurfaces = extractAnchors(componentSettings['ItemMeshReference'] || '')
 
-    // Pass 3: Bind structural properties together safely via exact GUID lookups
     const parsedItems = itemsMeta.map((metaItem) => {
-      const matchedTranslation = translationsMeta.find(
-        (t) => t.prefabFallbackName === 'ClutterPlasticBucket' || t.guid === metaItem.guid
-      )
-
       const targetGuid = metaItem.targetPrefabGuid || ''
       const rawPrefabText = prefabContents[targetGuid] || ''
       const extractedComponents = rawPrefabText ? parsePrefabGraph(rawPrefabText) : []
@@ -244,32 +271,34 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
         id: crypto.randomUUID(),
         guid: metaItem.guid || crypto.randomUUID(),
         name: trackingName.replace(/([A-Z])/g, ' $1').trim(),
-        description: matchedTranslation ? 'Just a plastic bucket' : 'Custom decorative mod asset.',
+        description: 'Imported Mod Object',
         price: metaItem.price !== undefined ? metaItem.price : 5,
-        tags: ['Decorative', 'Clutter'],
-        
-        // References our persistent cache map indexes directly
+        tags: ['Imported'],
         thumbnailKey: matchedThumbnailKey, 
         textureKeys: itemTextures, 
-        
-        componentBlueprints: {
-          rootDefaultStates: rootStates,
-          materialSurfaces: meshSurfaces,
-        },
+        componentBlueprints: { rootDefaultStates: rootStates, materialSurfaces: meshSurfaces },
         components: extractedComponents
       }
     })
 
-    // Pass 4: Finalize the integrated project manifest block
+    const parsedTranslations: TranslationData[] = []
+    if (translationsSettingContent) {
+      parsedTranslations.push({
+        language: detectedLanguageName || 'Custom',
+        strings: parseTranslations(translationsSettingContent)
+      })
+    }
+
     const synthesizedProject: ModProject = {
       id: crypto.randomUUID(),
-      name: parsedItems[0]?.name || 'Buckety McBucketFace Mod',
-      description: 'Imported Paralives engine object manifest configuration.',
+      name: parsedItems[0]?.name || detectedLanguageName || 'Imported Mod',
+      description: 'Imported Paralives engine mod configuration.',
       version: '1.0.0',
       author: 'Studio Creator',
       coverThumbnailKey: projectCoverKey, 
       items: parsedItems,
       assets: [],
+      translations: parsedTranslations,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }
@@ -277,17 +306,11 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
     onImportComplete(synthesizedProject)
   }
 
-  const directoryAttributes = {
-    webkitdirectory: "",
-    directory: ""
-  } as React.InputHTMLAttributes<HTMLInputElement>
+  const directoryAttributes = { webkitdirectory: "", directory: "" } as React.InputHTMLAttributes<HTMLInputElement>
 
   return (
     <div
-      onDragOver={(e) => {
-        e.preventDefault()
-        setIsDragging(true)
-      }}
+      onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
       onDragLeave={() => setIsDragging(false)}
       onDrop={(e) => {
         e.preventDefault()
@@ -303,26 +326,14 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
       <div className="p-4 bg-white/2 rounded-full text-gray-300">
         <Folder size={32} weight="duotone" className={isDragging ? 'text-[#8b5cf6]' : ''} />
       </div>
-      
       <div className="flex flex-col gap-1">
-        <p className="text-sm font-semibold text-white">
-          Drag and drop your extracted `.mod` folder here
-        </p>
-        <p className="text-xs text-gray-500 max-w-xs">
-          Your browser will automatically process your inner item settings, prefabs, and asset maps.
-        </p>
+        <p className="text-sm font-semibold text-white">Drag and drop your .mod or .zip file here</p>
+        <p className="text-xs text-gray-500 max-w-xs">Your browser will automatically extract the internal definitions.</p>
       </div>
-
-      <label className="flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-white/5 hover:bg-white/10 rounded-xl cursor-pointer transition-colors mt-2 focus-within:outline-none">
+      <label className="flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-white/5 hover:bg-white/10 rounded-xl cursor-pointer transition-colors mt-2">
         <UploadSimple size={14} weight="bold" />
         <span>Select Folder</span>
-        <input
-          type="file"
-          className="hidden"
-          multiple
-          onChange={(e) => e.target.files && processFiles(e.target.files)}
-          {...directoryAttributes}
-        />
+        <input type="file" className="hidden" multiple onChange={(e) => e.target.files && processFiles(e.target.files)} {...directoryAttributes} />
       </label>
     </div>
   )
