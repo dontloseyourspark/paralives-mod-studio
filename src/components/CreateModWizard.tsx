@@ -10,7 +10,8 @@ import type { Item } from '../types/types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type ModType = 'wall_paint' | 'furniture' | 'translation'
+// type ModType = 'wall_paint' | 'furniture' | 'translation'
+type ModType = 'translation'
 
 interface WizardState {
   modType: ModType | null
@@ -30,7 +31,7 @@ interface Props {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const MOD_TYPES = [
-  {
+  /* {
     id: 'wall_paint' as ModType,
     label: 'Wall Paint',
     description: 'Create a custom paint or wallpaper pattern for walls and surfaces.',
@@ -43,7 +44,7 @@ const MOD_TYPES = [
     description: 'Design a new piece of furniture for players to place in their builds.',
     tags: ['Object', 'Placeable', 'Build Mode'],
     icon: Armchair,
-  },
+  }, */
   {
     id: 'translation' as ModType,
     label: 'Translation',
@@ -53,7 +54,7 @@ const MOD_TYPES = [
   },
 ]
 
-const STEPS = ['Mod type', 'Upload', 'Preview']
+const STEPS = ['Mod type', 'Details', 'Preview']
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -315,7 +316,7 @@ export default function CreateModWizard({ isOpen, onClose, onComplete, onAdvance
         <p className="text-sm text-gray-500 mt-2 m-0">Choose the type of content you want to create.</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-1 gap-3">
         {MOD_TYPES.map(({ id, label, description, tags, icon: Icon }) => {
           const selected = state.modType === id
           return (
@@ -347,14 +348,14 @@ export default function CreateModWizard({ isOpen, onClose, onComplete, onAdvance
         })}
       </div>
 
-      <div className="text-center">
+      {/* <div className="text-center">
         <button
           onClick={handleSkipToAdvanced}
           className="text-xs text-gray-500 hover:text-[#a78bfa] transition-colors underline underline-offset-2 cursor-pointer bg-transparent border-none outline-none"
         >
           Skip to advanced editing →
         </button>
-      </div>
+      </div> */}
     </div>
   )
 
@@ -461,23 +462,17 @@ export default function CreateModWizard({ isOpen, onClose, onComplete, onAdvance
               </div>
             ))}
           </div>
-
+          {/*  
           <div className="grid grid-cols-2 gap-3">
-            <button
+             <button
               onClick={handleDownload}
               className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-white/5 hover:bg-white/8 border border-white/8 hover:border-white/14 text-sm font-semibold text-gray-300 hover:text-white cursor-pointer transition-all duration-150 outline-none"
             >
               <Download size={15} weight="bold" />
               Download template
-            </button>
-            <button
-              onClick={handleAdvancedEditing}
-              className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-[#8b5cf6] hover:bg-[#7c3aed] text-sm font-semibold text-white cursor-pointer transition-all duration-150 outline-none border-none shadow-lg shadow-[#8b5cf6]/20"
-            >
-              <Sliders size={15} weight="bold" />
-              Advanced editing
-            </button>
-          </div>
+            </button> 
+            
+          </div>*/}
         </div>
       )
     }
@@ -591,6 +586,15 @@ export default function CreateModWizard({ isOpen, onClose, onComplete, onAdvance
             Continue
             <ArrowRight size={14} weight="bold" />
           </button>
+        )}
+        {state.modType === 'translation' && step === 2 && (
+        <button
+              onClick={handleAdvancedEditing}
+              className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-[#8b5cf6] hover:bg-[#7c3aed] text-sm font-semibold text-white cursor-pointer transition-all duration-150 outline-none border-none shadow-lg shadow-[#8b5cf6]/20"
+            >
+              <Sliders size={15} weight="bold" />
+              Edit translation
+            </button>
         )}
         </div>
       </div>

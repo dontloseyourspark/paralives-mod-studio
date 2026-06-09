@@ -133,12 +133,12 @@ export default function Dashboard() {
             description="Browse and open a saved mod file"
             onClick={handleOpenMod}
           />
-          <DashboardCard
+        {/*   <DashboardCard
             icon={<Book size={24} weight="bold" className="text-gray-500" />}
             text="Read the docs"
             description="Feature coming soon"
             onClick={() => alert('Coming soon!')}
-          />
+          /> */}
         </div>
       </section>
 
