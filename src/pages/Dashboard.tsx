@@ -16,8 +16,8 @@ export default function Dashboard() {
   const setProject      = useModStore((s) => s.setProject)
   const addItemWith     = useModStore((s) => s.addItemWith)
 
-  const getBlobUrlFromCache = useModStore((s) => s.getBlobUrlFromCache)
-  const hasHydratedDisk     = useModStore((s) => s.hasHydratedDisk)
+  const stringUrlCache  = useModStore((s) => s.stringUrlCache)
+  const hasHydratedDisk = useModStore((s) => s.hasHydratedDisk)
 
   const [wizardOpen, setWizardOpen] = useState(false)
   const [toast, setToast] = useState<{ message: string; type: 'error' | 'info' | 'success' } | null>(null)
@@ -161,8 +161,8 @@ export default function Dashboard() {
             {/* Small screens: compact rows */}
             <div className="flex flex-col gap-3 lg:hidden">
               {recentProjects.map((project) => {
-                const liveCoverUrl = hasHydratedDisk
-                  ? getBlobUrlFromCache(project.coverThumbnailKey ?? null)
+                const liveCoverUrl = hasHydratedDisk && project.coverThumbnailKey
+                  ? (stringUrlCache[project.coverThumbnailKey] ?? null)
                   : null
 
                 return (
@@ -202,8 +202,8 @@ export default function Dashboard() {
             {/* Large screens: cards grid */}
             <div className="hidden lg:grid grid-cols-2 xl:grid-cols-3 gap-4">
               {recentProjects.map((project) => {
-                const liveCoverUrl = hasHydratedDisk
-                  ? getBlobUrlFromCache(project.coverThumbnailKey ?? null)
+                const liveCoverUrl = hasHydratedDisk && project.coverThumbnailKey
+                  ? (stringUrlCache[project.coverThumbnailKey] ?? null)
                   : null
 
                 return (

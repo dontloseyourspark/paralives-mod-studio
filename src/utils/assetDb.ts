@@ -1,119 +1,121 @@
 // src/utils/assetDb.ts
 
-const DB_NAME = 'paralives-studio-assets'
-const DB_VERSION = 1
+const DB_NAME    = 'paralives-studio-assets'
+const DB_VERSION = 2          // v2: stores {buffer,type} objects — ArrayBuffer is always structured-clone safe
 const STORE_NAME = 'binary-files'
 
-/**
- * Core structural initializer for the browser's native IndexedDB sandbox instance.
- */
-function initDb(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION)
+let dbPromise: Promise<IDBDatabase> | null = null
 
-    request.onupgradeneeded = (event) => {
-      const db = (event.target as IDBOpenDBRequest).result
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
+function getDb(): Promise<IDBDatabase> {
+  if (!dbPromise) {
+    dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(DB_NAME, DB_VERSION)
+
+      request.onupgradeneeded = (event) => {
+        const db = (event.target as IDBOpenDBRequest).result
+        // Drop and recreate on every upgrade — guarantees a clean schema and
+        // removes any corrupted records left by failed v1 writes.
+        if (db.objectStoreNames.contains(STORE_NAME)) {
+          db.deleteObjectStore(STORE_NAME)
+        }
         db.createObjectStore(STORE_NAME)
       }
-    }
 
-    request.onsuccess = (event) => {
-      resolve((event.target as IDBOpenDBRequest).result)
-    }
+      request.onsuccess = (event) => {
+        const db = (event.target as IDBOpenDBRequest).result
+        db.onclose = () => { dbPromise = null }
+        db.onversionchange = () => { db.close(); dbPromise = null }
+        resolve(db)
+      }
 
-    request.onerror = (event) => {
-      reject((event.target as IDBOpenDBRequest).error)
-    }
-  })
+      request.onerror = (event) => {
+        dbPromise = null
+        reject((event.target as IDBOpenDBRequest).error)
+      }
+    })
+  }
+  return dbPromise
+}
+
+// Normalise a stored value (v1 Blob or v2 {buffer,type}) back to a Blob.
+function toBlob(val: unknown): Blob | null {
+  if (!val) return null
+  if (val instanceof Blob) return val   // v1 legacy record
+  const v = val as { buffer?: ArrayBuffer; type?: string }
+  if (v.buffer instanceof ArrayBuffer) return new Blob([v.buffer], { type: v.type ?? '' })
+  return null
 }
 
 export const assetDb = {
-  /**
-   * Commits a raw browser File or Blob payload directly into long-term local storage.
-   */
   async saveFile(key: string, file: File | Blob): Promise<void> {
-    const db = await initDb()
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction(STORE_NAME, 'readwrite')
-      const store = transaction.objectStore(STORE_NAME)
-      const request = store.put(file, key)
+    // Read all bytes into memory BEFORE opening the IDB transaction.
+    // Storing an ArrayBuffer (not a Blob) avoids Chrome's structured-clone
+    // failures — Blob storage can raise UnknownError when the blob's internal
+    // reference becomes stale or when the DB connection state is unexpected.
+    const buffer = await file.arrayBuffer()
 
-      request.onsuccess = () => resolve()
-      request.onerror = () => reject(request.error)
+    const db = await getDb()
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite')
+      tx.oncomplete = () => resolve()
+      tx.onerror   = () => reject(tx.error)
+      tx.onabort   = () => reject(tx.error)
+      tx.objectStore(STORE_NAME).put({ buffer, type: file.type }, key)
     })
   },
 
-  /**
-   * Resolves a raw binary File/Blob record back into RAM by its lookup key.
-   */
-  async getFile(key: string): Promise<File | Blob | null> {
-    const db = await initDb()
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction(STORE_NAME, 'readonly')
-      const store = transaction.objectStore(STORE_NAME)
-      const request = store.get(key)
-
-      request.onsuccess = () => resolve(request.result || null)
-      request.onerror = () => reject(request.error)
+  async getFile(key: string): Promise<Blob | null> {
+    const db = await getDb()
+    return new Promise<Blob | null>((resolve, reject) => {
+      const tx  = db.transaction(STORE_NAME, 'readonly')
+      const req = tx.objectStore(STORE_NAME).get(key)
+      req.onsuccess = () => resolve(toBlob(req.result))
+      req.onerror   = () => reject(req.error)
     })
   },
 
-  /**
-   * Pulls the complete database manifest down in a single batch pass during application boot.
-   */
-  async getAllFiles(): Promise<Record<string, File | Blob>> {
-    const db = await initDb()
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction(STORE_NAME, 'readonly')
-      const store = transaction.objectStore(STORE_NAME)
-      
-      const records: Record<string, File | Blob> = {}
-      
-      // Use an IDB Cursor loop to cleanly stream elements out of the engine
-      const request = store.openCursor()
+  async getAllFiles(): Promise<Record<string, Blob>> {
+    const db = await getDb()
+    return new Promise<Record<string, Blob>>((resolve, reject) => {
+      const tx      = db.transaction(STORE_NAME, 'readonly')
+      const records: Record<string, Blob> = {}
+      const req     = tx.objectStore(STORE_NAME).openCursor()
 
-      request.onsuccess = (event) => {
+      req.onsuccess = (event) => {
         const cursor = (event.target as IDBRequest<IDBCursorWithValue | null>).result
         if (cursor) {
-          records[cursor.key as string] = cursor.value
+          const blob = toBlob(cursor.value)
+          if (blob) records[cursor.key as string] = blob
           cursor.continue()
         } else {
           resolve(records)
         }
       }
 
-      request.onerror = () => reject(request.error)
+      req.onerror = () => reject(req.error)
+      tx.onabort  = () => reject(tx.error)
     })
   },
 
-  /**
-   * Drops a specific asset out of the database workspace.
-   */
   async deleteFile(key: string): Promise<void> {
-    const db = await initDb()
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction(STORE_NAME, 'readwrite')
-      const store = transaction.objectStore(STORE_NAME)
-      const request = store.delete(key)
-
-      request.onsuccess = () => resolve()
-      request.onerror = () => reject(request.error)
+    const db = await getDb()
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite')
+      tx.oncomplete = () => resolve()
+      tx.onerror    = () => reject(tx.error)
+      tx.onabort    = () => reject(tx.error)
+      tx.objectStore(STORE_NAME).delete(key)
     })
   },
 
-  /**
-   * Flushes the entire database clean.
-   */
   async clearAll(): Promise<void> {
-    const db = await initDb()
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction(STORE_NAME, 'readwrite')
-      const store = transaction.objectStore(STORE_NAME)
-      const request = store.clear()
-
-      request.onsuccess = () => resolve()
-      request.onerror = () => reject(request.error)
+    const db = await getDb()
+    return new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite')
+      tx.oncomplete = () => resolve()
+      tx.onerror    = () => reject(tx.error)
+      tx.onabort    = () => reject(tx.error)
+      tx.objectStore(STORE_NAME).clear()
     })
-  }
+  },
 }

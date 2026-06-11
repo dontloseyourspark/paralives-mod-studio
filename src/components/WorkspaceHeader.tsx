@@ -1,5 +1,7 @@
-import { ArrowLeft, FloppyDisk } from 'phosphor-react'
+import { useRef, useState } from 'react'
+import { ArrowLeft, FloppyDisk, Image } from 'phosphor-react'
 import type { ModProject } from '../types/types'
+import { useModStore } from '../store/useModStore'
 
 interface WorkspaceHeaderProps {
   project: ModProject
@@ -15,6 +17,7 @@ interface WorkspaceHeaderProps {
  * Responsibilities:
  *   - Back navigation button
  *   - Editable project name, version, and author inline inputs
+ *   - Workshop thumbnail upload (drag-and-drop or click)
  *   - Save button with saving state
  *
  * This component owns zero business logic. All handlers are injected via props.
@@ -27,6 +30,30 @@ export default function WorkspaceHeader({
   onSave,
   onProjectChange,
 }: WorkspaceHeaderProps) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [dragging, setDragging] = useState(false)
+
+  const registerFileInCache  = useModStore((s) => s.registerFileInCache)
+  const getBlobUrlFromCache  = useModStore((s) => s.getBlobUrlFromCache)
+  const hasHydratedDisk      = useModStore((s) => s.hasHydratedDisk)
+
+  const thumbnailUrl = hasHydratedDisk
+    ? getBlobUrlFromCache(project.coverThumbnailKey)
+    : null
+
+  const handleThumbnailFile = (file: File) => {
+    const key = `cover_${project.id}`
+    registerFileInCache(key, file)
+    onProjectChange({ ...project, coverThumbnailKey: key })
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    setDragging(false)
+    const file = e.dataTransfer.files[0]
+    if (file && file.type.startsWith('image/')) handleThumbnailFile(file)
+  }
+
   return (
     <header className="h-14 border-b border-white/5 bg-[#161923] px-6 flex items-center justify-between shrink-0 select-none">
 
@@ -53,7 +80,7 @@ export default function WorkspaceHeader({
         </div>
       </div>
 
-      {/* Right: Version, author, save */}
+      {/* Right: Version, author, thumbnail, save */}
       <div className="flex items-center gap-5 shrink-0">
         <div className="flex items-center gap-3 border-r border-white/5 pr-5 text-xs">
           <div className="flex items-center gap-1">
@@ -74,6 +101,50 @@ export default function WorkspaceHeader({
               onChange={(e) => onProjectChange({ ...project, author: e.target.value })}
             />
           </div>
+        </div>
+
+        {/* Workshop thumbnail drop zone */}
+        <div className="border-r border-white/5 pr-5">
+          <input
+            ref={inputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              if (file) handleThumbnailFile(file)
+              // Reset so re-uploading same file triggers onChange again
+              e.target.value = ''
+            }}
+          />
+          <button
+            onClick={() => inputRef.current?.click()}
+            onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={handleDrop}
+            title={thumbnailUrl ? 'Replace workshop thumbnail' : 'Upload workshop thumbnail (1020×1020 PNG recommended)'}
+            className={`
+              relative w-8 h-8 rounded-lg border overflow-hidden cursor-pointer transition-all outline-none
+              ${dragging
+                ? 'border-[#8b5cf6] bg-[#8b5cf6]/15 scale-110'
+                : thumbnailUrl
+                  ? 'border-[#8b5cf6]/30 hover:border-[#8b5cf6]/60'
+                  : 'border-white/10 bg-white/3 hover:border-white/20 hover:bg-white/5'
+              }
+            `}
+          >
+            {thumbnailUrl ? (
+              <img
+                src={thumbnailUrl}
+                alt="Workshop thumbnail"
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center">
+                <Image size={14} className="text-gray-500" weight="light" />
+              </div>
+            )}
+          </button>
         </div>
 
         <button

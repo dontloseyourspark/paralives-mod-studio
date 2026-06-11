@@ -19,7 +19,7 @@ import type { Item } from '../types/types'
  */
 export function useProjectWorkspace() {
   const navigate = useNavigate()
-  const { projectId } = useParams<{ projectId: string }>()
+  const { id: projectId } = useParams<{ id: string }>()
 
   // ── Zustand persist hydration gate ────────────────────────────────────────
   // Wait for localStorage restore to complete before acting on store state.

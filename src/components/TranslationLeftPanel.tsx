@@ -1,5 +1,6 @@
 // src/components/TranslationLeftPanel.tsx
-import React from 'react'
+import React, { useRef, useState } from 'react'
+import { Image } from 'phosphor-react'
 
 export interface CategoryStat {
   id: string
@@ -12,11 +13,66 @@ interface TranslationLeftPanelProps {
   categories: CategoryStat[]
   activeCategoryId: string
   onSelect: (id: string) => void
+  thumbnailUrl: string | null
+  onThumbnailUpload: (file: File) => void
 }
 
-export default function TranslationLeftPanel({ categories, activeCategoryId, onSelect }: TranslationLeftPanelProps) {
+export default function TranslationLeftPanel({ categories, activeCategoryId, onSelect, thumbnailUrl, onThumbnailUpload }: TranslationLeftPanelProps) {
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [dragging, setDragging] = useState(false)
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    setDragging(false)
+    const file = e.dataTransfer.files[0]
+    if (file && file.type.startsWith('image/')) onThumbnailUpload(file)
+  }
+
   return (
     <div className="w-52 shrink-0 h-full bg-[#161923] border-r border-white/5 flex flex-col select-none">
+
+      {/* Cover thumbnail */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          if (file) onThumbnailUpload(file)
+          e.target.value = ''
+        }}
+      />
+      <div
+        onClick={() => fileInputRef.current?.click()}
+        onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={handleDrop}
+        title={thumbnailUrl ? 'Replace mod cover thumbnail' : 'Upload mod cover thumbnail (1020×1020 PNG recommended)'}
+        className="w-full h-32 shrink-0 relative overflow-hidden cursor-pointer group border-b border-white/5"
+      >
+        {thumbnailUrl ? (
+          <>
+            <img src={thumbnailUrl} alt="Mod cover" className="w-full h-full object-cover" />
+            <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center gap-1.5 transition-opacity">
+              <Image size={16} className="text-white" weight="light" />
+              <span className="text-white text-[10px] font-semibold tracking-wide">Change Cover</span>
+            </div>
+          </>
+        ) : (
+          <div className={`absolute inset-2 rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-2 transition-all ${
+            dragging
+              ? 'border-[#8b5cf6]/60 bg-[#8b5cf6]/5'
+              : 'border-white/10 group-hover:border-white/20'
+          }`}>
+            <Image size={20} weight="light" className={`transition-colors ${dragging ? 'text-[#a78bfa]' : 'text-gray-500 group-hover:text-gray-400'}`} />
+            <span className={`text-[10px] font-medium text-center leading-tight px-3 transition-colors ${dragging ? 'text-[#a78bfa]' : 'text-gray-500 group-hover:text-gray-400'}`}>
+              {dragging ? 'Drop to set cover' : 'Click or drop\nto add cover'}
+            </span>
+          </div>
+        )}
+      </div>
+
       <div className="px-4 py-3.5 border-b border-white/5 shrink-0">
         <h3 className="text-[10px] font-bold uppercase tracking-widest text-gray-500">Categories</h3>
       </div>

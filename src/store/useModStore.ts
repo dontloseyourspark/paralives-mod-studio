@@ -231,8 +231,10 @@ export const useModStore = create<ModStoreState>()(
         assetDb.saveFile(key, file).catch((err) =>
           console.error(`[Store:registerFileInCache] IndexedDB write failure: ${key}`, err)
         )
+        const url = URL.createObjectURL(file)
         set((state) => ({
           binaryFileCache: { ...state.binaryFileCache, [key]: file },
+          stringUrlCache: { ...state.stringUrlCache, [key]: url },
         }))
       },
 
