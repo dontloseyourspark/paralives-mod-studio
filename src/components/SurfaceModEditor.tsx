@@ -3,13 +3,11 @@ import {
   CloudArrowUp, Download, Plus, Trash, FloppyDisk,
   PaintBucket, File, CheckCircle, WarningCircle,
 } from 'phosphor-react'
-import type {
-  SurfaceMod, ColorZoneCount,
-  SwatchEntry, SurfaceTextureAsset,
-} from '../types/surfacemodTypes'
 import {
-  SURFACE_TAG_PRESETS, generatePGuid, 
-} from '../types/surfacemodTypes'
+  type SurfaceMod, type ColorZoneCount,
+  type SwatchEntry, type SwatchColor, type SurfaceTextureAsset,
+  SURFACE_TAG_PRESETS, generatePGuid,
+} from '../types/surfaceModTypes'
 import { generateSurfaceModFiles, type ModFileEntry } from '../lib/surfaceModGenerator'
 import { exportSurfaceModAsZip } from '../lib/modBundleExporter'
 import { useModStore } from '../store/useModStore'
@@ -216,7 +214,7 @@ function SwatchEditor({
                         const b = parseInt(v.slice(5, 7), 16) / 255
                         const next = swatches.map((s, i) => i !== si ? s : {
                           ...s,
-                          colors: s.colors.map((col, j) => j !== ci ? col : { ...col, r, g, b }),
+                          colors: s.colors.map((col: SwatchColor, j: number) => j !== ci ? col : { ...col, r, g, b }),
                         })
                         onChange(next)
                       }}
@@ -292,7 +290,7 @@ export default function SurfaceModEditor({ mod, onChange, onSave, workshopThumbn
   // ── Zone count change — keep swatch colors in sync ─────────────────────
   const handleZoneCountChange = (count: ColorZoneCount) => {
     const numColors = count + 1
-    const swatches = mod.swatches.map(s => {
+    const swatches = mod.swatches.map((s: SwatchEntry) => {
       const colors = Array.from({ length: numColors }, (_, i) =>
         s.colors[i] ?? { guid: generatePGuid(), r: 1, g: 1, b: 1, a: 1 }
       )
@@ -387,7 +385,7 @@ export default function SurfaceModEditor({ mod, onChange, onSave, workshopThumbn
           <SectionHeader>Catalog placement</SectionHeader>
           <Field label="Surface category">
             <select
-              value={Object.entries(SURFACE_TAG_PRESETS).find(([, v]) => v[0] === mod.buildModeTags[0] && v[1] === mod.buildModeTags[1])?.[0] ?? ''}
+              value={Object.entries(SURFACE_TAG_PRESETS).find(([, v]) => (v as string[])[0] === mod.buildModeTags[0] && (v as string[])[1] === mod.buildModeTags[1])?.[0] ?? ''}
               onChange={e => {
                 const preset = SURFACE_TAG_PRESETS[e.target.value]
                 if (!preset) return

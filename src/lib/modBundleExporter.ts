@@ -170,5 +170,5 @@ function buildUncompressedZip(entries: { path: string; data: Uint8Array }[]): Bl
     u16le(0),
   )
 
-  return new Blob([...locals, centralData, eocd], { type: 'application/zip' })
+  return new Blob([...locals, centralData, eocd] as BlobPart[], { type: 'application/zip' })
 }

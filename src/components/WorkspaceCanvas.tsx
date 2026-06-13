@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Plus, Trash } from 'phosphor-react'
 import ItemsPanel from './ItemsPanel'
 import ItemEditorPanel from './ItemEditorPanel'
-import CreateModWizard from './CreateModWizard'
+import CreateModWizard, { type TranslationWizardPayload } from './CreateModWizard'
 import TranslationEditorPanel from './TranslationEditorPanel'
 import type { Item, ModProject } from '../types/types'
 
@@ -15,7 +15,7 @@ interface WorkspaceCanvasProps {
   onAddItem: () => void
   onDeleteItem: (itemId: string) => void
   onSaveItem: (updatedItem: Item) => void
-  onWizardAdvancedEditing: (partial: Partial<Item>) => void
+  onWizardAdvancedEditing: (partial: Partial<Item> | TranslationWizardPayload) => void
 }
 
 export default function WorkspaceCanvas({

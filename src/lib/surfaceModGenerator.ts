@@ -1,5 +1,5 @@
 // src/lib/surfaceModGenerator.ts
-import type { SurfaceMod } from '../types/surfaceModTypes';
+import type { SurfaceMod } from '../types/surfaceModTypes'
 
 export interface ModFileEntry {
   path: string
@@ -57,3 +57,5 @@ export function generateSurfaceModFiles(mod: SurfaceMod): Record<string, string>
 
   return files;
 }
+
+export const filenameStem = (internalName: string) => internalName;
