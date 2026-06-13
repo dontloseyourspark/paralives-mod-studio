@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useModStore } from '../store/useModStore'
 import type { Item } from '../types/types'
+import type { TranslationWizardPayload } from '../components/CreateModWizard'
 
 /**
  * All workspace logic for the project editor screen.
@@ -130,7 +131,8 @@ export function useProjectWorkspace() {
    * Adds the partially-built item to the project and selects it so the
    * full editor opens immediately.
    */
-  const handleWizardAdvancedEditing = (partial: Partial<Item>) => {
+  const handleWizardAdvancedEditing = (partial: Partial<Item> | TranslationWizardPayload) => {
+    if ('isTranslation' in partial) return
     const newItem: Item = {
       id:   partial.id   ?? crypto.randomUUID(),
       guid: partial.guid ?? crypto.randomUUID(),
