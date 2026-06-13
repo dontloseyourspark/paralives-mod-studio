@@ -59,7 +59,7 @@ function NumberInput({ value, onChange, min, max, step }: {
     <input
       type="number"
       value={value}
-      min={min}; max={max}; step={step ?? 0.1}
+      min={min} max={max} step={step ?? 0.1}
       onChange={e => onChange(parseFloat(e.target.value) || 0)}
       className="bg-white/3 border border-white/8 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-[#8b5cf6]/50 transition-colors font-mono"
     />
