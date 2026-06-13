@@ -1,17 +1,16 @@
 // src/components/CreateModWizard.tsx
 import { useState, useRef, useCallback } from 'react'
 import {
-  X, ArrowLeft, ArrowRight, Check,
-  PaintBucket, Armchair, CloudArrowUp,
-  Download, Sliders, Eye, File, Translate
+  X, Armchair, ArrowRight, Check, CloudArrowUp,
+  Download, Sliders, Eye, File, PaintBucket, Translate
 } from 'phosphor-react'
 import { useModStore } from '../store/useModStore'
 import type { Item } from '../types/types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-// type ModType = 'wall_paint' | 'furniture' | 'translation'
-type ModType = 'translation'
+type ModType = 'wall_paint' | 'furniture' | 'translation'
+//type ModType = 'translation'
 
 interface WizardState {
   modType: ModType | null
@@ -21,17 +20,22 @@ interface WizardState {
   textureFiles: File[]
 }
 
+export interface TranslationWizardPayload {
+  isTranslation: true
+  language: string
+}
+
 interface Props {
   isOpen: boolean
   onClose: () => void
   onComplete?: (item: Item) => void
-  onAdvancedEditing?: (partial: Partial<Item>) => void
+  onAdvancedEditing?: (partial: Partial<Item> | TranslationWizardPayload) => void
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const MOD_TYPES = [
-  /* {
+  {
     id: 'wall_paint' as ModType,
     label: 'Wall Paint',
     description: 'Create a custom paint or wallpaper pattern for walls and surfaces.',
@@ -44,7 +48,7 @@ const MOD_TYPES = [
     description: 'Design a new piece of furniture for players to place in their builds.',
     tags: ['Object', 'Placeable', 'Build Mode'],
     icon: Armchair,
-  }, */
+  }, 
   {
     id: 'translation' as ModType,
     label: 'Translation',
@@ -183,8 +187,8 @@ function DropZone({
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function CreateModWizard({ isOpen, onClose, onComplete, onAdvancedEditing }: Props) {
-  const currentProject = useModStore((s) => s.currentProject)
-  const updateProject = useModStore((s) => s.updateProject)
+/*   const currentProject = useModStore((s) => s.currentProject)
+  const updateProject = useModStore((s) => s.updateProject) */
   const addItemWith = useModStore((s) => s.addItemWith)
   const registerFileInCache = useModStore((s) => s.registerFileInCache)
 
@@ -278,10 +282,10 @@ export default function CreateModWizard({ isOpen, onClose, onComplete, onAdvance
   const handleAdvancedEditing = () => {
     if (state.modType === 'translation') {
       // Pass a special payload so the parent (Dashboard) can create the project & navigate
-      onAdvancedEditing?.({ 
-        isTranslation: true, 
-        language: state.language.trim() 
-      } as any)
+      onAdvancedEditing?.({
+        isTranslation: true,
+        language: state.language.trim()
+      })
       handleClose()
       return
     }
@@ -291,7 +295,7 @@ export default function CreateModWizard({ isOpen, onClose, onComplete, onAdvance
     handleClose()
   }
 
-  const handleSkipToAdvanced = () => {
+  /* const handleSkipToAdvanced = () => {
     onAdvancedEditing?.({
       id:   crypto.randomUUID(),
       guid: crypto.randomUUID(),
@@ -305,7 +309,7 @@ export default function CreateModWizard({ isOpen, onClose, onComplete, onAdvance
       components: [],
     })
     handleClose()
-  }
+  } */
 
   // ── Step renderers ─────────────────────────────────────────────────────────
 

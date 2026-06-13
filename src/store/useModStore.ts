@@ -2,7 +2,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { assetDb } from '../utils/assetDb'
-import type { ModProject, Item, TranslationData } from '../types/types'
+import type { ModProject, Item } from '../types/types'
 
 interface ModStoreState {
   currentProject: ModProject | null
@@ -296,9 +296,9 @@ export const useModStore = create<ModStoreState>()(
         currentProject: state.currentProject,
         selectedItemId: state.selectedItemId,
       }),
-      merge: (persistedState: any, currentState) => ({
+      merge: (persistedState: unknown, currentState) => ({
         ...currentState,
-        ...persistedState,
+        ...(persistedState as Partial<ModStoreState>),
         binaryFileCache: {},
         stringUrlCache: {},
         hasHydratedDisk: false,

@@ -9,7 +9,7 @@ interface ItemEditorProps {
 
 export default function ItemEditor({ hideCreateButton, onEdit }: ItemEditorProps) {
   const project = useModStore((s) => s.currentProject)
-  const addItem = useModStore((s) => s.addItem)
+  const addItemWith = useModStore(state => state.addItemWith)
   const deleteItem = useModStore((s) => s.deleteItem)
 
   if (!project) return null
@@ -26,7 +26,20 @@ export default function ItemEditor({ hideCreateButton, onEdit }: ItemEditorProps
         <div className="flex justify-end select-none">
           <button 
             className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-[#8b5cf6] hover:bg-[#7c3aed] active:bg-[#6d28d9] rounded-xl transition-colors duration-150 border-none cursor-pointer shadow-sm" 
-            onClick={addItem}
+            onClick={() => addItemWith({
+              name: 'New Item', price: 0,
+              id: '',
+              guid: '',
+              description: '',
+              tags: [],
+              thumbnailKey: null,
+              textureKeys: {},
+              componentBlueprints: {
+                rootDefaultStates: [],
+                materialSurfaces: []
+              },
+              components: []
+            })}
           >
             <Plus size={14} weight="bold" />
             <span>Create Item</span>

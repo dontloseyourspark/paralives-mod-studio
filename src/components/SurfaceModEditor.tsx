@@ -4,13 +4,13 @@ import {
   PaintBucket, File, CheckCircle, WarningCircle,
 } from 'phosphor-react'
 import type {
-  SurfaceMod, BuildModeTagName, ColorZoneCount,
-  SwatchEntry, SwatchColor, SurfaceTextureAsset,
-} from '../types/surfaceModTypes'
+  SurfaceMod, ColorZoneCount,
+  SwatchEntry, SurfaceTextureAsset,
+} from '../types/surfacemodTypes'
 import {
-  SURFACE_TAG_PRESETS, generatePGuid, GAME_ASSET_GUID,
-} from '../types/surfaceModTypes'
-import { generateSurfaceModFiles } from '../lib/surfaceModGenerator'
+  SURFACE_TAG_PRESETS, generatePGuid, 
+} from '../types/surfacemodTypes'
+import { generateSurfaceModFiles, type ModFileEntry } from '../lib/surfaceModGenerator'
 import { exportSurfaceModAsZip } from '../lib/modBundleExporter'
 import { useModStore } from '../store/useModStore'
 
@@ -133,7 +133,7 @@ function TextureDropZone({
             }
             <div className="flex-1 min-w-0">
               <div className="text-xs font-semibold text-white truncate">{asset.filename}</div>
-              <div className="text-[10px] text-gray-500 font-mono truncate">{(asset as any).guid?.slice(0, 16)}…</div>
+              <div className="text-[10px] text-gray-500 font-mono truncate">{(asset).guid?.slice(0, 16)}…</div>
             </div>
             <button
               onClick={e => { e.stopPropagation(); onClear() }}
@@ -165,7 +165,7 @@ function SwatchEditor({
   const numColors = colorZoneCount + 1
   const zoneLabels = ['Base', 'Zone 1 (Red)', 'Zone 2 (Green)', 'Zone 3 (Blue)'].slice(0, numColors)
 
-  const updateColor = (si: number, ci: number, field: keyof SwatchColor, raw: string) => {
+  /* const updateColor = (si: number, ci: number, field: keyof SwatchColor, raw: string) => {
     const val = parseFloat(raw)
     if (isNaN(val)) return
     const next = swatches.map((s, i) => i !== si ? s : {
@@ -173,7 +173,7 @@ function SwatchEditor({
       colors: s.colors.map((c, j) => j !== ci ? c : { ...c, [field]: Math.max(0, Math.min(1, val)) }),
     })
     onChange(next)
-  }
+  } */
 
   const addSwatch = () => {
     onChange([...swatches, {
@@ -307,7 +307,8 @@ export default function SurfaceModEditor({ mod, onChange, onSave, workshopThumbn
     setExporting(true)
     setExportError(null)
     try {
-      const entries = generateSurfaceModFiles(mod)
+      const fileMap = generateSurfaceModFiles(mod)
+      const entries: ModFileEntry[] = Object.entries(fileMap).map(([path, text]) => ({ path, text }))
       await exportSurfaceModAsZip(mod, entries, workshopThumbnailKey)
       setExportDone(true)
       setTimeout(() => setExportDone(false), 3000)

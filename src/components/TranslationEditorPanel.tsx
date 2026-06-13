@@ -1,7 +1,7 @@
 // src/components/TranslationEditorPanel.tsx
 import React, { useState, useMemo, useRef, useEffect } from 'react'
 import { useModStore } from '../store/useModStore'
-import { Plus, MagnifyingGlass, CheckCircle, Warning, Code, Image } from 'phosphor-react'
+import { MagnifyingGlass, CheckCircle, Warning, Code, Image } from 'phosphor-react'
 import JSZip from 'jszip'
 import englishReference from '../data/englishReference.json'
 import TranslationLeftPanel from './TranslationLeftPanel'
@@ -415,7 +415,7 @@ export default function TranslationEditorPanel() {
 
     const transContent = `#Setting.Translations\r\n =Items\r\n` +
       Object.entries(activeTranslation.strings)
-        .filter(([_, v]) => (v as string).trim() !== '')
+        .filter(([v]) => (v as string).trim() !== '')
         .map(([k, v]) => `  ${k}\r\n   =Value:${v}`).join('\r\n')
 
     settings?.file(`Translations.setting`, transContent)

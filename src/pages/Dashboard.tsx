@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useModStore } from '../store/useModStore'
 import ModImporter from '../components/ModImporter'
-import CreateModWizard from '../components/CreateModWizard'
+import CreateModWizard, { type TranslationWizardPayload } from '../components/CreateModWizard'
 import type { Item } from '../types/types'
 import englishReference from '../data/englishReference.json'
 
@@ -31,10 +31,10 @@ export default function Dashboard() {
 
   const handleCreateMod = () => setWizardOpen(true)
 
-  const handleWizardAdvanced = (payload: any) => {
+  const handleWizardAdvanced = (payload: Partial<Item> | TranslationWizardPayload) => {
     const project = createProject()
 
-    if (payload && payload.isTranslation) {
+    if ('isTranslation' in payload && payload.isTranslation) {
       const initialStrings: Record<string, string> = {}
       Object.keys(englishReference).forEach((guid) => {
         initialStrings[guid] = ''
