@@ -1,42 +1,24 @@
 // src/utils/assetDb.ts
 
-// By changing the DB_NAME, we force Chrome to abandon the corrupted 
-// LevelDB file on your hard drive and create a fresh, clean one.
-const DB_NAME    = 'paralives-studio-assets-v5' 
-const DB_VERSION = 1          
+const DB_NAME    = 'paralives-studio-assets-v7' // Bumped to v7 to bypass localhost corruption
 const STORE_NAME = 'binary-files'
 
-let dbPromise: Promise<IDBDatabase> | null = null
+function openDb(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, 1)
 
-function getDb(): Promise<IDBDatabase> {
-  if (!dbPromise) {
-    dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open(DB_NAME, DB_VERSION)
-
-      request.onupgradeneeded = (event) => {
-        const db = (event.target as IDBOpenDBRequest).result
-        if (!db.objectStoreNames.contains(STORE_NAME)) {
-          db.createObjectStore(STORE_NAME)
-        }
+    request.onupgradeneeded = (e) => {
+      const db = (e.target as IDBOpenDBRequest).result
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME)
       }
+    }
 
-      request.onsuccess = (event) => {
-        const db = (event.target as IDBOpenDBRequest).result
-        db.onclose = () => { dbPromise = null }
-        db.onversionchange = () => { db.close(); dbPromise = null }
-        resolve(db)
-      }
-
-      request.onerror = (event) => {
-        dbPromise = null
-        reject((event.target as IDBOpenDBRequest).error)
-      }
-    })
-  }
-  return dbPromise
+    request.onsuccess = () => resolve(request.result)
+    request.onerror = () => reject(request.error)
+  })
 }
 
-// Helper: Safely convert to Base64 to avoid Chrome Blob DOM Garbage Collection bugs
 function fileToBase64(file: File | Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -46,7 +28,6 @@ function fileToBase64(file: File | Blob): Promise<string> {
   })
 }
 
-// Helper: Convert Base64 back to a usable Blob for the compiler
 function base64ToBlob(dataUrl: string): Blob {
   const parts = dataUrl.split(',')
   const mime = parts[0].match(/:(.*?);/)?.[1] || 'application/octet-stream'
@@ -63,43 +44,44 @@ export const assetDb = {
   async saveFile(key: string, file: File | Blob): Promise<void> {
     try {
       const base64String = await fileToBase64(file)
-      const db = await getDb()
+      const db = await openDb()
 
       await new Promise<void>((resolve, reject) => {
         const tx = db.transaction(STORE_NAME, 'readwrite')
-        tx.oncomplete = () => resolve()
-        tx.onerror   = () => reject(tx.error)
-        tx.onabort   = () => reject(tx.error)
+        
+        tx.oncomplete = () => { db.close(); resolve() }
+        
+        // CRITICAL: Close the database even if it fails to prevent locking!
+        tx.onerror = () => { db.close(); reject(tx.error) }
+        tx.onabort = () => { db.close(); reject(tx.error) }
+        
         tx.objectStore(STORE_NAME).put(base64String, key)
       })
+      
+      console.log(`[assetDb] Successfully saved ${key} to disk.`)
     } catch (error) {
-      // FAIL GRACEFULLY: If the hard drive strictly blocks IDB writes (corruption/incognito),
-      // we catch the error so it doesn't crash React. The image still lives in Zustand's 
-      // RAM cache for the session, meaning the UI keeps working!
-      console.warn(`[assetDb] Could not write to disk, falling back to memory cache. Error:`, error)
+      console.error(`[assetDb] Disk save failed for ${key}:`, error)
     }
   },
 
   async getFile(key: string): Promise<Blob | null> {
     try {
-      const db = await getDb()
+      const db = await openDb()
       return await new Promise<Blob | null>((resolve, reject) => {
-        const tx  = db.transaction(STORE_NAME, 'readonly')
+        const tx = db.transaction(STORE_NAME, 'readonly')
         const req = tx.objectStore(STORE_NAME).get(key)
         
         req.onsuccess = () => {
+          db.close() 
           const val = req.result
           if (typeof val === 'string' && val.startsWith('data:')) {
             resolve(base64ToBlob(val))
-          } else if (val instanceof Blob) {
-            resolve(val) // Legacy fallback
-          } else if (val && val.buffer) {
-            resolve(new Blob([val.buffer], { type: val.type || '' })) // V2 fallback
           } else {
             resolve(null)
           }
         }
-        req.onerror = () => reject(req.error)
+        
+        tx.onerror = () => { db.close(); reject(tx.error) }
       })
     } catch (error) {
       console.warn(`[assetDb] Disk read failed for key ${key}:`, error)
@@ -109,7 +91,7 @@ export const assetDb = {
 
   async getAllFiles(): Promise<Record<string, Blob>> {
     try {
-      const db = await getDb()
+      const db = await openDb()
       return await new Promise<Record<string, Blob>>((resolve, reject) => {
         const tx = db.transaction(STORE_NAME, 'readonly')
         const records: Record<string, Blob> = {}
@@ -121,33 +103,30 @@ export const assetDb = {
             const val = cursor.value
             if (typeof val === 'string' && val.startsWith('data:')) {
               records[cursor.key as string] = base64ToBlob(val)
-            } else if (val instanceof Blob) {
-              records[cursor.key as string] = val
-            } else if (val && val.buffer) {
-              records[cursor.key as string] = new Blob([val.buffer], { type: val.type || '' })
             }
             cursor.continue()
           } else {
+            db.close() 
             resolve(records)
           }
         }
-        req.onerror = () => reject(req.error)
-        tx.onabort  = () => reject(tx.error)
+        
+        tx.onerror = () => { db.close(); reject(tx.error) }
       })
     } catch (error) {
-      console.warn(`[assetDb] Could not bulk read files from disk:`, error)
+      console.error(`[assetDb] Could not bulk read files from disk:`, error)
       return {}
     }
   },
 
   async deleteFile(key: string): Promise<void> {
     try {
-      const db = await getDb()
+      const db = await openDb()
       await new Promise<void>((resolve, reject) => {
         const tx = db.transaction(STORE_NAME, 'readwrite')
-        tx.oncomplete = () => resolve()
-        tx.onerror    = () => reject(tx.error)
-        tx.onabort    = () => reject(tx.error)
+        tx.oncomplete = () => { db.close(); resolve() }
+        tx.onerror = () => { db.close(); reject(tx.error) }
+        tx.onabort = () => { db.close(); reject(tx.error) }
         tx.objectStore(STORE_NAME).delete(key)
       })
     } catch (error) {
@@ -157,12 +136,12 @@ export const assetDb = {
 
   async clearAll(): Promise<void> {
     try {
-      const db = await getDb()
+      const db = await openDb()
       await new Promise<void>((resolve, reject) => {
         const tx = db.transaction(STORE_NAME, 'readwrite')
-        tx.oncomplete = () => resolve()
-        tx.onerror    = () => reject(tx.error)
-        tx.onabort    = () => reject(tx.error)
+        tx.oncomplete = () => { db.close(); resolve() }
+        tx.onerror = () => { db.close(); reject(tx.error) }
+        tx.onabort = () => { db.close(); reject(tx.error) }
         tx.objectStore(STORE_NAME).clear()
       })
     } catch (error) {

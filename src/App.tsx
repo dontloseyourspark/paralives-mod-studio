@@ -1,3 +1,4 @@
+// src/App.tsx
 import './App.css'
 import AppRoutes from './routes/AppRoutes'
 import React, { useEffect, useState } from 'react'
@@ -6,19 +7,6 @@ import { useModStore } from './store/useModStore'
 export default function App() {
   const hydrateCacheFromDisk = useModStore((s) => s.hydrateCacheFromDisk)
   const hasHydratedDisk      = useModStore((s) => s.hasHydratedDisk)
-
-  // ── Two-phase boot sequence ────────────────────────────────────────────────
-  //
-  // Phase 1 (Zustand persist): recentProjects is loaded from localStorage.
-  //   Tracked by useModStore.persist.hasHydrated().
-  //
-  // Phase 2 (IndexedDB): binary file blobs are loaded and object URLs are
-  //   generated. Tracked by hasHydratedDisk in the store.
-  //
-  // We block rendering AppRoutes until BOTH phases complete. This guarantees:
-  //   - useProjectWorkspace always finds recentProjects populated on refresh
-  //   - getBlobUrlFromCache always hits a warm cache on first render, so
-  //     thumbnails and images never flicker or show as missing
 
   const [persistReady, setPersistReady] = useState(
     () => useModStore.persist.hasHydrated()
@@ -30,12 +18,13 @@ export default function App() {
     return unsub
   }, [persistReady])
 
-  // Kick off IndexedDB load as soon as the persist phase is done
+  // Force the database to load the second persist is ready, completely ignoring the previous hasHydratedDisk flag
   useEffect(() => {
-    if (persistReady && !hasHydratedDisk) {
+    if (persistReady) {
+      console.log("🚀 Firing database hydration...")
       hydrateCacheFromDisk()
     }
-  }, [persistReady, hasHydratedDisk, hydrateCacheFromDisk])
+  }, [persistReady, hydrateCacheFromDisk])
 
   // Both phases must be complete before we render anything
   if (!persistReady || !hasHydratedDisk) {

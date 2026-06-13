@@ -478,6 +478,7 @@ export default function TranslationEditorPanel() {
       {/* Secondary toolbar row — sort, filter, search */}
       <div className="flex flex-wrap items-center gap-2 border-b border-white/10 bg-[#161923] px-4 py-2 shrink-0">
         <div className="flex bg-black/30 border border-white/5 rounded-lg p-0.5 select-none">
+          <p className="px-2.5 py-1 text-[11px] font-semibold text-gray-400 uppercase">Sort by:</p>
           {(['guid', 'english', 'key'] as const).map((s) => (
             <button
               key={s}
@@ -492,6 +493,7 @@ export default function TranslationEditorPanel() {
         <div className="w-px h-4 bg-white/10 shrink-0" />
 
         <div className="flex bg-black/30 border border-white/5 rounded-lg p-0.5 select-none">
+          <p className="px-2.5 py-1 text-[11px] font-semibold text-gray-400 uppercase">Filter:</p>
           {(['all', 'filled', 'empty'] as const).map((filter) => (
             <button
               key={filter}
@@ -528,6 +530,7 @@ export default function TranslationEditorPanel() {
           />
 
           {/* Editor grid */}
+          
           <div className="flex-1 overflow-y-auto p-6">
             {filteredEntries.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-40 text-gray-500 text-sm border-2 border-dashed border-white/5 rounded-2xl">
@@ -535,6 +538,12 @@ export default function TranslationEditorPanel() {
               </div>
             ) : (
               <>
+              <div className="flex flex-col items-left pb-4 justify-lefttext-gray-500 text-lg border-0">
+                <span className="font-large text-gray-400">Translations</span> 
+                    <p className="text-xs text-gray-600">
+                      Showing {displayLimit} of {filteredEntries.length} strings
+                    </p>
+              </div>
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                   {filteredEntries.slice(0, displayLimit).map(([guid, text]) => {
                     const refData = referenceStrings[guid]
