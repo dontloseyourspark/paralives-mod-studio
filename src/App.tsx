@@ -12,16 +12,15 @@ export default function App() {
     () => useModStore.persist.hasHydrated()
   )
 
-  useEffect(() => {
-    if (persistReady) return
-    const unsub = useModStore.persist.onFinishHydration(() => setPersistReady(true))
-    return unsub
-  }, [persistReady])
-
-  // Force the database to load the second persist is ready, completely ignoring the previous hasHydratedDisk flag
+  // Force the database to load the second persist is ready
   useEffect(() => {
     if (persistReady) {
       console.log("🚀 Firing database hydration...")
+      
+      // CRITICAL FIX: Erase the phantom 'true' flag from the previous session's persist
+      useModStore.setState({ hasHydratedDisk: false }) 
+      
+      // Now the function will actually run instead of skipping itself!
       hydrateCacheFromDisk()
     }
   }, [persistReady, hydrateCacheFromDisk])
