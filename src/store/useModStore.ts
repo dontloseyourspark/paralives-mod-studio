@@ -41,17 +41,28 @@ export const useModStore = create<ModStoreState>()(
 
       hydrateCacheFromDisk: async () => {
         try {
+          console.log("🔍 [DIAGNOSTIC 1] Starting hydration. Sweeping LocalStorage...")
+          
           const storedRecords = await assetDb.getAllFiles()
+          console.log("🔍 [DIAGNOSTIC 2] Files physically found on disk:", Object.keys(storedRecords))
+
           const rehydratedUrlCache: Record<string, string> = {}
           Object.entries(storedRecords).forEach(([key, binary]) => {
             rehydratedUrlCache[key] = URL.createObjectURL(binary)
           })
+
+          console.log("🔍 [DIAGNOSTIC 3] Usable URLs generated in RAM:", Object.keys(rehydratedUrlCache))
+          
+          const currentKey = get().currentProject?.coverThumbnailKey
+          console.log("🔍 [DIAGNOSTIC 4] The Current Project is asking for Key:", currentKey)
 
           set({
             binaryFileCache: storedRecords,
             stringUrlCache: rehydratedUrlCache,
             hasHydratedDisk: true,
           })
+          
+          console.log("✅ [DIAGNOSTIC 5] Hydration complete. UI Unlocked.")
         } catch (err) {
           console.error('[Store:hydrateCacheFromDisk] Rehydration error:', err)
           set({ hasHydratedDisk: true })
