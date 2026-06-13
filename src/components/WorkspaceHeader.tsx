@@ -12,14 +12,6 @@ interface WorkspaceHeaderProps {
   onProjectChange: (updated: ModProject) => void
 }
 
-  const stringUrlCache = useModStore((s) => s.stringUrlCache)
-  const thumbnailUrl = project.coverThumbnailKey ? stringUrlCache[project.coverThumbnailKey] : null
-
-  // --- TEMPORARY DEBUG BLOCK: Paste this right below thumbnailUrl ---
-  const debugLoadedImages = Object.keys(stringUrlCache).length
-  const debugProjectKey = project.coverThumbnailKey || 'NULL (Forgot ID!)'
-  // ------------------------------------------------------------------
-
 export default function WorkspaceHeader({
   project,
   isSaving,
@@ -63,11 +55,7 @@ export default function WorkspaceHeader({
 
        <div className="flex flex-col min-w-0">
           <span className="text-[10px] text-gray-500 font-mono mt-0.5 tracking-tight">
-            Now editing mod project: 
-            {/* TEMPORARY DEBUG TEXT */}
-            <span className="text-[#8b5cf6] ml-2">
-              [RAM Images: {debugLoadedImages}] | [Looking for: {debugProjectKey}]
-            </span>
+            Now editing mod project:
           </span>
           <input
             type="text"
