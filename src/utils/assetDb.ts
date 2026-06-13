@@ -19,12 +19,50 @@ function openDb(): Promise<IDBDatabase> {
   })
 }
 
-function fileToBase64(file: File | Blob): Promise<string> {
+// ─── NEW: The Auto-Compressor ───────────────────────────────────────────────
+// This intercepts the image, scales it to a max of 800px, and converts it to a 
+// tiny WebP string (usually < 80kb) so it never blows up the LocalStorage quota.
+function compressImageToBase64(file: File | Blob): Promise<string> {
   return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(reader.result as string)
-    reader.onerror = () => reject(reader.error)
-    reader.readAsDataURL(file)
+    const url = URL.createObjectURL(file)
+    const img = new Image()
+
+    img.onload = () => {
+      URL.revokeObjectURL(url)
+      const canvas = document.createElement('canvas')
+      const ctx = canvas.getContext('2d')
+      
+      // Safety fallback: if canvas fails, do standard Base64 conversion
+      if (!ctx) {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result as string)
+        reader.readAsDataURL(file)
+        return
+      }
+
+      // Force exact 1024x1024 square required by the game engine
+      const TARGET_SIZE = 1024
+      canvas.width = TARGET_SIZE
+      canvas.height = TARGET_SIZE
+
+      // Calculate perfect center crop to prevent stretching
+      const minDim = Math.min(img.width, img.height)
+      const startX = (img.width - minDim) / 2
+      const startY = (img.height - minDim) / 2
+
+      // Draw: source X, Y, W, H -> destination X, Y, W, H
+      ctx.drawImage(
+        img, 
+        startX, startY, minDim, minDim, 
+        0, 0, TARGET_SIZE, TARGET_SIZE
+      )
+
+      // Export as a compressed WebP at 80% quality
+      resolve(canvas.toDataURL('image/webp', 0.8))
+    }
+
+    img.onerror = () => reject(new Error('Failed to load image for compression.'))
+    img.src = url
   })
 }
 
@@ -43,7 +81,8 @@ function base64ToBlob(dataUrl: string): Blob {
 export const assetDb = {
   async saveFile(key: string, file: File | Blob): Promise<void> {
     try {
-      const base64String = await fileToBase64(file)
+      // Use the new compressor here!
+      const base64String = await compressImageToBase64(file)
 
       // ATTEMPT 1: The Standard IndexedDB Engine
       try {
@@ -56,17 +95,16 @@ export const assetDb = {
           tx.objectStore(STORE_NAME).put(base64String, key)
         })
         console.log(`[assetDb] Successfully saved ${key} to IndexedDB.`)
-        return // If it worked, exit the function early!
+        return 
       } catch (idbError) {
         console.warn(`[assetDb] IndexedDB threw an Internal Error. Executing fallback protocol...`)
       }
 
       // ATTEMPT 2: The Bulletproof LocalStorage Fallback
-      // If the browser reaches this point, it means IDB is completely broken.
-      // We save the image to standard LocalStorage instead, which guarantees persistence.
+      // Now that the image is a tiny WebP, it will easily fit inside the 5MB limit.
       try {
         localStorage.setItem(`asset_fallback_${key}`, base64String)
-        console.log(`[assetDb] Successfully saved ${key} to LocalStorage fallback.`)
+        console.log(`[assetDb] Successfully saved compressed ${key} to LocalStorage fallback.`)
       } catch (lsError) {
         console.error(`[assetDb] LocalStorage fallback failed (Quota Exceeded?):`, lsError)
       }
@@ -77,13 +115,11 @@ export const assetDb = {
   },
 
   async getFile(key: string): Promise<Blob | null> {
-    // 1. Check if the image was forced into the LocalStorage Fallback
     const fallbackData = localStorage.getItem(`asset_fallback_${key}`)
     if (fallbackData) {
       return base64ToBlob(fallbackData)
     }
 
-    // 2. Otherwise, check standard IndexedDB
     try {
       const db = await openDb()
       return await new Promise<Blob | null>((resolve, reject) => {
@@ -110,7 +146,6 @@ export const assetDb = {
   async getAllFiles(): Promise<Record<string, Blob>> {
     const records: Record<string, Blob> = {}
 
-    // 1. Gather all LocalStorage fallback images first
     for (let i = 0; i < localStorage.length; i++) {
       const lsKey = localStorage.key(i)
       if (lsKey && lsKey.startsWith('asset_fallback_')) {
@@ -122,7 +157,6 @@ export const assetDb = {
       }
     }
 
-    // 2. Gather IndexedDB images
     try {
       const db = await openDb()
       await new Promise<void>((resolve, reject) => {
@@ -133,7 +167,6 @@ export const assetDb = {
           const cursor = (event.target as IDBRequest<IDBCursorWithValue | null>).result
           if (cursor) {
             const val = cursor.value
-            // Only add the image if it wasn't already loaded from the fallback
             if (typeof val === 'string' && val.startsWith('data:') && !records[cursor.key as string]) {
               records[cursor.key as string] = base64ToBlob(val)
             }
@@ -153,7 +186,6 @@ export const assetDb = {
   },
 
   async deleteFile(key: string): Promise<void> {
-    // Delete from both places to be absolutely certain
     localStorage.removeItem(`asset_fallback_${key}`)
     try {
       const db = await openDb()
