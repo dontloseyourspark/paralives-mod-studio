@@ -228,43 +228,43 @@ export const useModStore = create<ModStoreState>()(
         }),
 
       registerFileInCache: (key, file) => {
-        assetDb.saveFile(key, file).catch((err) =>
-          console.error(`[Store:registerFileInCache] IndexedDB write failure: ${key}`, err)
-        )
-        const url = URL.createObjectURL(file)
+        const freshUrl = URL.createObjectURL(file)
+        
         set((state) => ({
           binaryFileCache: { ...state.binaryFileCache, [key]: file },
-          stringUrlCache: { ...state.stringUrlCache, [key]: url },
+          stringUrlCache: { ...state.stringUrlCache, [key]: freshUrl }
         }))
+
+        assetDb.saveFile(key, file).catch((err) => {
+          console.error(`[Store:registerFileInCache] IndexedDB write failure: ${key}`, err)
+        })
       },
 
-      getBlobUrlFromCache: (key) => {
+    getBlobUrlFromCache: (key) => {
         if (!key || key === 'PROJECT_COVER_MASTER') return null
 
-        const existingUrl = get().stringUrlCache[key]
-        if (existingUrl) return existingUrl
+        const { stringUrlCache, binaryFileCache } = get()
 
-        const cachedBinary = get().binaryFileCache[key]
-        if (cachedBinary) {
-          const freshUrl = URL.createObjectURL(cachedBinary)
-          set((state) => ({
-            stringUrlCache: { ...state.stringUrlCache, [key]: freshUrl },
-          }))
+        // 1. If we already generated a URL, return it instantly
+        if (stringUrlCache[key]) return stringUrlCache[key]
+
+        // 2. If we have the binary file in memory but no URL yet, create one safely
+        if (binaryFileCache[key]) {
+          const freshUrl = URL.createObjectURL(binaryFileCache[key])
+          
+          // Defers the state update so React doesn't crash during render
+          setTimeout(() => {
+            set((state) => ({
+              stringUrlCache: { ...state.stringUrlCache, [key]: freshUrl },
+            }))
+          }, 0)
+          
           return freshUrl
         }
 
-        assetDb.getFile(key).then((dbFile) => {
-          if (dbFile) {
-            const recoveryUrl = URL.createObjectURL(dbFile)
-            set((state) => ({
-              binaryFileCache: { ...state.binaryFileCache, [key]: dbFile },
-              stringUrlCache:  { ...state.stringUrlCache,  [key]: recoveryUrl },
-            }))
-          }
-        }).catch((err) => {
-          console.error(`[Store:getBlobUrlFromCache] Transaction fault on key: ${key}`, err)
-        })
-
+        // 3. Return null! 
+        // We completely remove assetDb.getFile() from here. 
+        // This instantly kills the infinite loop and the database crashes.
         return null
       },
 

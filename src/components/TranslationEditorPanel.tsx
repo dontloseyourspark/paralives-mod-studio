@@ -1,8 +1,7 @@
 // src/components/TranslationEditorPanel.tsx
 import React, { useState, useMemo, useRef, useEffect } from 'react'
 import { useModStore } from '../store/useModStore'
-import { assetDb } from '../utils/assetDb'
-import { Plus, MagnifyingGlass, CheckCircle, Warning, Code } from 'phosphor-react'
+import { Plus, MagnifyingGlass, CheckCircle, Warning, Code, Image } from 'phosphor-react'
 import JSZip from 'jszip'
 import englishReference from '../data/englishReference.json'
 import TranslationLeftPanel from './TranslationLeftPanel'
@@ -72,7 +71,6 @@ const TRANSLATION_CATEGORIES: CategoryDef[] = [
   { id: 'other', label: 'Other / Unmapped' },
 ]
 
-// Build prefix → categoryId map from explicit prefix sets
 const PREFIX_TO_CATEGORY = new Map<string, string>()
 for (const cat of TRANSLATION_CATEGORIES) {
   if (cat.prefixes) {
@@ -180,7 +178,7 @@ export default function TranslationEditorPanel() {
   const updateProject = useModStore((state) => state.updateProject)
   const updateTranslationString = useModStore((state) => state.updateTranslationString)
   const registerFileInCache = useModStore((state) => state.registerFileInCache)
-  const hasHydratedDisk = useModStore((state) => state.hasHydratedDisk)
+  const stringUrlCache = useModStore((state) => state.stringUrlCache)
 
   const translations = currentProject?.translations || []
   const [activeLangIndex, setActiveLangIndex] = useState(0)
@@ -193,42 +191,16 @@ export default function TranslationEditorPanel() {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const thumbnailInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (!toast) return
     const id = setTimeout(() => setToast(null), 3000)
     return () => clearTimeout(id)
   }, [toast])
-
-  const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null)
-
-  useEffect(() => {
-    const key = currentProject?.coverThumbnailKey
-    if (!key || !hasHydratedDisk) {
-      const raf = requestAnimationFrame(() => setThumbnailUrl(null))
-      return () => cancelAnimationFrame(raf)
-    }
-
-    const { stringUrlCache, binaryFileCache } = useModStore.getState()
-
-    if (stringUrlCache[key]) {
-      const raf = requestAnimationFrame(() => setThumbnailUrl(stringUrlCache[key]))
-      return () => cancelAnimationFrame(raf)
-    }
-
-    if (binaryFileCache[key]) {
-      const url = URL.createObjectURL(binaryFileCache[key])
-      const raf = requestAnimationFrame(() => setThumbnailUrl(url))
-      return () => cancelAnimationFrame(raf)
-    }
-
-    // Fallback: load directly from IndexedDB (handles hydration failures)
-    let cancelled = false
-    assetDb.getFile(key).then((file) => {
-      if (!cancelled && file) setThumbnailUrl(URL.createObjectURL(file))
-    }).catch(() => {})
-    return () => { cancelled = true }
-  }, [currentProject?.coverThumbnailKey, hasHydratedDisk])
+  
+  // DIRECT REACTIVE LOOKUP: No boolean gatekeepers.
+  const thumbnailUrl = currentProject?.coverThumbnailKey ? stringUrlCache[currentProject.coverThumbnailKey] : null
 
   const handleThumbnailUpload = (file: File) => {
     if (!currentProject) return
@@ -236,7 +208,7 @@ export default function TranslationEditorPanel() {
       const key = `cover_${currentProject.id}`
       registerFileInCache(key, file)
       updateProject({ ...currentProject, coverThumbnailKey: key })
-      setThumbnailUrl(URL.createObjectURL(file))
+      
       setToast({ message: 'Cover image saved — it will appear on your dashboard.', type: 'success' })
     } catch {
       setToast({ message: 'Failed to save cover image. Please try again.', type: 'error' })
@@ -246,13 +218,11 @@ export default function TranslationEditorPanel() {
   const referenceStrings = englishReference as Record<string, string | { text: string; key: string }>
   const activeTranslation = translations[activeLangIndex]
 
-  // Show skeleton on first mount to mask the initial heavy useMemo computation
   useEffect(() => {
     const raf = requestAnimationFrame(() => setIsReady(true))
     return () => cancelAnimationFrame(raf)
   }, [])
 
-  // Per-category stats (counts all strings, ignores search/status filter)
   const categoryStats = useMemo(() => {
     const stats = new Map<string, { total: number; completed: number }>()
     for (const cat of TRANSLATION_CATEGORIES) stats.set(cat.id, { total: 0, completed: 0 })
@@ -322,7 +292,7 @@ export default function TranslationEditorPanel() {
         const kB = typeof rB === 'object' ? rB.key : ''
         return kA.localeCompare(kB)
       }
-      return guidA.localeCompare(guidB) // 'guid' default
+      return guidA.localeCompare(guidB)
     })
   }, [isReady, activeTranslation, search, statusFilter, referenceStrings, selectedCategory, sortBy])
 
@@ -462,6 +432,16 @@ export default function TranslationEditorPanel() {
   return (
     <div className="flex flex-col h-full bg-[#0e1017] text-gray-300 overflow-hidden">
       <input type="file" accept=".csv" ref={fileInputRef} onChange={handleImportCSV} className="hidden" />
+      <input 
+        type="file" 
+        accept="image/png,image/jpeg" 
+        ref={thumbnailInputRef} 
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          if (file) handleThumbnailUpload(file)
+        }} 
+        className="hidden" 
+      />
 
       {/* Primary toolbar row — language tabs + action buttons */}
       <div className="flex items-center justify-between gap-3 border-b border-white/5 bg-[#161923] px-4 py-2.5 shrink-0">
@@ -477,6 +457,17 @@ export default function TranslationEditorPanel() {
           ))}
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          <button 
+            onClick={() => thumbnailInputRef.current?.click()} 
+            className={`flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-xs font-bold transition-colors ${
+              thumbnailUrl 
+                ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' 
+                : 'bg-white/5 border-white/10 text-gray-300 hover:bg-white/10'
+            }`}
+          >
+            <Image size={14} />
+            {thumbnailUrl ? 'Thumbnail Loaded' : 'Set Thumbnail'}
+          </button>
           <button onClick={handleAddString} className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-xs font-bold transition-colors">Add</button>
           <button onClick={() => fileInputRef.current?.click()} className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-xs font-bold transition-colors">Import</button>
           <button onClick={handleExportCSV} className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-xs font-bold transition-colors">CSV</button>
@@ -484,9 +475,8 @@ export default function TranslationEditorPanel() {
         </div>
       </div>
 
-      {/* Secondary toolbar row — sort, filter, search (wraps on narrow screens) */}
+      {/* Secondary toolbar row — sort, filter, search */}
       <div className="flex flex-wrap items-center gap-2 border-b border-white/10 bg-[#161923] px-4 py-2 shrink-0">
-        {/* Sort */}
         <div className="flex bg-black/30 border border-white/5 rounded-lg p-0.5 select-none">
           {(['guid', 'english', 'key'] as const).map((s) => (
             <button
@@ -501,7 +491,6 @@ export default function TranslationEditorPanel() {
 
         <div className="w-px h-4 bg-white/10 shrink-0" />
 
-        {/* Status filter */}
         <div className="flex bg-black/30 border border-white/5 rounded-lg p-0.5 select-none">
           {(['all', 'filled', 'empty'] as const).map((filter) => (
             <button
@@ -514,7 +503,6 @@ export default function TranslationEditorPanel() {
           ))}
         </div>
 
-        {/* Search */}
         <div className="relative flex-1 min-w-40">
           <MagnifyingGlass className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-600" size={13} />
           <input

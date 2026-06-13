@@ -1,3 +1,4 @@
+// src/components/WorkspaceHeader.tsx
 import { useRef, useState } from 'react'
 import { ArrowLeft, FloppyDisk, Image } from 'phosphor-react'
 import type { ModProject } from '../types/types'
@@ -11,18 +12,6 @@ interface WorkspaceHeaderProps {
   onProjectChange: (updated: ModProject) => void
 }
 
-/**
- * The persistent top bar shown in the project editor.
- *
- * Responsibilities:
- *   - Back navigation button
- *   - Editable project name, version, and author inline inputs
- *   - Workshop thumbnail upload (drag-and-drop or click)
- *   - Save button with saving state
- *
- * This component owns zero business logic. All handlers are injected via props.
- * Changing this file cannot affect data flow, store state, or item behaviour.
- */
 export default function WorkspaceHeader({
   project,
   isSaving,
@@ -34,12 +23,10 @@ export default function WorkspaceHeader({
   const [dragging, setDragging] = useState(false)
 
   const registerFileInCache  = useModStore((s) => s.registerFileInCache)
-  const getBlobUrlFromCache  = useModStore((s) => s.getBlobUrlFromCache)
-  const hasHydratedDisk      = useModStore((s) => s.hasHydratedDisk)
+  const stringUrlCache       = useModStore((s) => s.stringUrlCache)
 
-  const thumbnailUrl = hasHydratedDisk
-    ? getBlobUrlFromCache(project.coverThumbnailKey)
-    : null
+  // DIRECT REACTIVE LOOKUP: No boolean gatekeepers needed anymore!
+  const thumbnailUrl = project.coverThumbnailKey ? stringUrlCache[project.coverThumbnailKey] : null
 
   const handleThumbnailFile = (file: File) => {
     const key = `cover_${project.id}`
@@ -56,7 +43,6 @@ export default function WorkspaceHeader({
 
   return (
     <header className="h-14 border-b border-white/5 bg-[#161923] px-6 flex items-center justify-between shrink-0 select-none">
-
       {/* Left: Back button + project name */}
       <div className="flex items-center gap-4 min-w-0">
         <button
@@ -113,7 +99,6 @@ export default function WorkspaceHeader({
             onChange={(e) => {
               const file = e.target.files?.[0]
               if (file) handleThumbnailFile(file)
-              // Reset so re-uploading same file triggers onChange again
               e.target.value = ''
             }}
           />

@@ -1,5 +1,6 @@
+// src/pages/Dashboard.tsx
 import DashboardCard from '../components/DashboardCard'
-import { Plus, Folder, Book, WarningCircle, X } from 'phosphor-react'
+import { Plus, Folder, WarningCircle, X } from 'phosphor-react'
 import type { ModProject } from '../types/types'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -10,14 +11,14 @@ import type { Item } from '../types/types'
 import englishReference from '../data/englishReference.json'
 
 export default function Dashboard() {
-  const navigate        = useNavigate()
-  const createProject   = useModStore((s) => s.createProject)
-  const recentProjects  = useModStore((s) => s.recentProjects)
-  const setProject      = useModStore((s) => s.setProject)
-  const addItemWith     = useModStore((s) => s.addItemWith)
-
-  const stringUrlCache  = useModStore((s) => s.stringUrlCache)
-  const hasHydratedDisk = useModStore((s) => s.hasHydratedDisk)
+  const navigate            = useNavigate()
+  const createProject       = useModStore((s) => s.createProject)
+  const recentProjects      = useModStore((s) => s.recentProjects)
+  const setProject          = useModStore((s) => s.setProject)
+  const addItemWith         = useModStore((s) => s.addItemWith)
+  
+  // Grab the safe URL fetcher we fixed in the store
+  const getBlobUrlFromCache = useModStore((s) => s.getBlobUrlFromCache)
 
   const [wizardOpen, setWizardOpen] = useState(false)
   const [toast, setToast] = useState<{ message: string; type: 'error' | 'info' | 'success' } | null>(null)
@@ -28,18 +29,12 @@ export default function Dashboard() {
     return () => window.clearTimeout(timer)
   }, [toast])
 
-  // Opens the wizard — project is created only after the wizard completes
   const handleCreateMod = () => setWizardOpen(true)
-
-  // Wizard finished via "Advanced editing" or "Skip to advanced editing"
-  // Create the project, optionally add the wizard item, then navigate
- // Find this function inside src/pages/Dashboard.tsx and replace it:
 
   const handleWizardAdvanced = (payload: any) => {
     const project = createProject()
 
     if (payload && payload.isTranslation) {
-      // Auto-populate all known English GUIDs with empty strings
       const initialStrings: Record<string, string> = {}
       Object.keys(englishReference).forEach((guid) => {
         initialStrings[guid] = ''
@@ -58,7 +53,6 @@ export default function Dashboard() {
       }
       setProject(updatedProject)
     } else {
-      // Normal Item flow
       const partial = payload as Partial<Item>
       const hasContent = partial.name && partial.name !== 'New Mod Item'
       if (hasContent) {
@@ -82,7 +76,6 @@ export default function Dashboard() {
     navigate(`/project/${project.id}`)
   }
 
-  // Wizard finished via "Download mod" — project is created with the item
   const handleWizardComplete = (item: Item) => {
     const project = createProject()
     addItemWith(item)
@@ -133,12 +126,6 @@ export default function Dashboard() {
             description="Browse and open a saved mod file"
             onClick={handleOpenMod}
           />
-        {/*   <DashboardCard
-            icon={<Book size={24} weight="bold" className="text-gray-500" />}
-            text="Read the docs"
-            description="Feature coming soon"
-            onClick={() => alert('Coming soon!')}
-          /> */}
         </div>
       </section>
 
@@ -161,8 +148,9 @@ export default function Dashboard() {
             {/* Small screens: compact rows */}
             <div className="flex flex-col gap-3 lg:hidden">
               {recentProjects.map((project) => {
-                const liveCoverUrl = hasHydratedDisk && project.coverThumbnailKey
-                  ? (stringUrlCache[project.coverThumbnailKey] ?? null)
+                // Safely grab the URL using our fixed store function
+                const liveCoverUrl = project.coverThumbnailKey 
+                  ? getBlobUrlFromCache(project.coverThumbnailKey) 
                   : null
 
                 return (
@@ -171,7 +159,6 @@ export default function Dashboard() {
                     className="flex flex-row items-center gap-4 p-4 bg-[#161923] border border-white/5 hover:border-white/10 hover:bg-white/2 rounded-2xl cursor-pointer transition-all duration-150 select-none group"
                     onClick={() => handleOpenProject(project)}
                   >
-                    {/* Cover thumbnail */}
                     <div className="w-12 h-12 bg-black/20 border border-white/5 rounded-xl overflow-hidden shrink-0 flex items-center justify-center shadow-inner">
                       {liveCoverUrl ? (
                         <img src={liveCoverUrl} alt={project.name} className="w-full h-full object-cover" />
@@ -180,7 +167,6 @@ export default function Dashboard() {
                       )}
                     </div>
 
-                    {/* Name + meta */}
                     <div className="flex-1 flex flex-col gap-0.5 min-w-0">
                       <h3 className="text-sm font-semibold text-white group-hover:text-[#8b5cf6] transition-colors m-0 truncate">
                         {project.name || 'Untitled Mod'}
@@ -190,7 +176,6 @@ export default function Dashboard() {
                       </p>
                     </div>
 
-                    {/* Modified date */}
                     <span className="text-[11px] text-gray-600 shrink-0">
                       {project.updatedAt ? new Date(project.updatedAt).toLocaleDateString() : '—'}
                     </span>
@@ -202,8 +187,9 @@ export default function Dashboard() {
             {/* Large screens: cards grid */}
             <div className="hidden lg:grid grid-cols-2 xl:grid-cols-3 gap-4">
               {recentProjects.map((project) => {
-                const liveCoverUrl = hasHydratedDisk && project.coverThumbnailKey
-                  ? (stringUrlCache[project.coverThumbnailKey] ?? null)
+                // Safely grab the URL using our fixed store function
+                const liveCoverUrl = project.coverThumbnailKey 
+                  ? getBlobUrlFromCache(project.coverThumbnailKey) 
                   : null
 
                 return (
@@ -212,8 +198,7 @@ export default function Dashboard() {
                     className="flex flex-col bg-[#161923] border border-white/5 hover:border-[#8b5cf6]/30 hover:bg-white/2 rounded-2xl cursor-pointer transition-all duration-150 select-none group overflow-hidden"
                     onClick={() => handleOpenProject(project)}
                   >
-                    {/* Cover image area */}
-                    <div className="w-full aspect-video bg-black/30 border-b border-white/5 flex items-center justify-center overflow-hidden">
+                    <div className="w-full h-32 bg-black/30 border-b border-white/5 flex items-center justify-center overflow-hidden">
                       {liveCoverUrl ? (
                         <img src={liveCoverUrl} alt={project.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
                       ) : (
@@ -224,7 +209,6 @@ export default function Dashboard() {
                       )}
                     </div>
 
-                    {/* Card body */}
                     <div className="flex flex-col gap-3 p-4">
                       <div className="flex flex-col gap-0.5">
                         <h3 className="text-sm font-semibold text-white group-hover:text-[#8b5cf6] transition-colors m-0 truncate">
@@ -269,7 +253,6 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* New mod wizard — mounted here so it gates project creation */}
       <CreateModWizard
         isOpen={wizardOpen}
         onClose={() => setWizardOpen(false)}
