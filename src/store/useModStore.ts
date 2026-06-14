@@ -41,20 +41,20 @@ export const useModStore = create<ModStoreState>()(
 
       hydrateCacheFromDisk: async () => {
         try {
-          console.log("🔍 [DIAGNOSTIC 1] Starting hydration. Sweeping LocalStorage...")
+          console.log("[DIAGNOSTIC 1] Starting hydration. Sweeping LocalStorage...")
           
           const storedRecords = await assetDb.getAllFiles()
-          console.log("🔍 [DIAGNOSTIC 2] Files physically found on disk:", Object.keys(storedRecords))
+          console.log("[DIAGNOSTIC 2] Files physically found on disk:", Object.keys(storedRecords))
 
           const rehydratedUrlCache: Record<string, string> = {}
           Object.entries(storedRecords).forEach(([key, binary]) => {
             rehydratedUrlCache[key] = URL.createObjectURL(binary)
           })
 
-          console.log("🔍 [DIAGNOSTIC 3] Usable URLs generated in RAM:", Object.keys(rehydratedUrlCache))
+          console.log("[DIAGNOSTIC 3] Usable URLs generated in RAM:", Object.keys(rehydratedUrlCache))
           
           const currentKey = get().currentProject?.coverThumbnailKey
-          console.log("🔍 [DIAGNOSTIC 4] The Current Project is asking for Key:", currentKey)
+          console.log("[DIAGNOSTIC 4] The Current Project is asking for Key:", currentKey)
 
           set({
             binaryFileCache: storedRecords,
@@ -62,7 +62,7 @@ export const useModStore = create<ModStoreState>()(
             hasHydratedDisk: true,
           })
           
-          console.log("✅ [DIAGNOSTIC 5] Hydration complete. UI Unlocked.")
+          console.log("[DIAGNOSTIC 5] Hydration complete. UI Unlocked.")
         } catch (err) {
           console.error('[Store:hydrateCacheFromDisk] Rehydration error:', err)
           set({ hasHydratedDisk: true })
@@ -256,26 +256,27 @@ export const useModStore = create<ModStoreState>()(
 
         const { stringUrlCache, binaryFileCache } = get()
 
-        // 1. If we already generated a URL, return it instantly
+        // 1. Check RAM first
         if (stringUrlCache[key]) return stringUrlCache[key]
 
-        // 2. If we have the binary file in memory but no URL yet, create one safely
+        // 2. NEW: The Synchronous Cheat Code! 
+        // If it's on the disk, it's already a valid image URL. Use it instantly.
+        const fallbackData = localStorage.getItem(`asset_fallback_${key}`)
+        if (fallbackData) {
+          return fallbackData 
+        }
+
+        // 3. Fallback for active session binaries
         if (binaryFileCache[key]) {
           const freshUrl = URL.createObjectURL(binaryFileCache[key])
-          
-          // Defers the state update so React doesn't crash during render
           setTimeout(() => {
             set((state) => ({
               stringUrlCache: { ...state.stringUrlCache, [key]: freshUrl },
             }))
           }, 0)
-          
           return freshUrl
         }
 
-        // 3. Return null! 
-        // We completely remove assetDb.getFile() from here. 
-        // This instantly kills the infinite loop and the database crashes.
         return null
       },
 

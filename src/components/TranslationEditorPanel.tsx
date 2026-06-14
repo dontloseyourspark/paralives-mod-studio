@@ -178,7 +178,12 @@ export default function TranslationEditorPanel() {
   const updateProject = useModStore((state) => state.updateProject)
   const updateTranslationString = useModStore((state) => state.updateTranslationString)
   const registerFileInCache = useModStore((state) => state.registerFileInCache)
-  const stringUrlCache = useModStore((state) => state.stringUrlCache)
+  const stringUrlCache = useModStore((s) => s.stringUrlCache)
+  
+  // The Ultimate Cheat Code: RAM first, Hard Drive second
+  const panelCoverUrl = currentProject?.coverThumbnailKey 
+    ? stringUrlCache[currentProject.coverThumbnailKey] || localStorage.getItem(`asset_fallback_${currentProject.coverThumbnailKey}`)
+    : null
 
   const translations = currentProject?.translations || []
   const [activeLangIndex, setActiveLangIndex] = useState(0)
@@ -525,7 +530,7 @@ export default function TranslationEditorPanel() {
             categories={categoryList}
             activeCategoryId={selectedCategory}
             onSelect={(id) => { setSelectedCategory(id); setDisplayLimit(50) }}
-            thumbnailUrl={thumbnailUrl}
+            thumbnailUrl={panelCoverUrl}
             onThumbnailUpload={handleThumbnailUpload}
           />
 

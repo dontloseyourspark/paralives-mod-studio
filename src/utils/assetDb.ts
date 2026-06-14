@@ -19,9 +19,8 @@ function openDb(): Promise<IDBDatabase> {
   })
 }
 
-// ─── NEW: The Auto-Compressor ───────────────────────────────────────────────
-// This intercepts the image, scales it to a max of 800px, and converts it to a 
-// tiny WebP string (usually < 80kb) so it never blows up the LocalStorage quota.
+// Intercepts the image, crops it perfectly to the center, scales it to 1024x1024, 
+// and converts it to a tiny WebP string so it never blows up the LocalStorage quota.
 function compressImageToBase64(file: File | Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file)
@@ -32,7 +31,6 @@ function compressImageToBase64(file: File | Blob): Promise<string> {
       const canvas = document.createElement('canvas')
       const ctx = canvas.getContext('2d')
       
-      // Safety fallback: if canvas fails, do standard Base64 conversion
       if (!ctx) {
         const reader = new FileReader()
         reader.onload = () => resolve(reader.result as string)
@@ -40,24 +38,20 @@ function compressImageToBase64(file: File | Blob): Promise<string> {
         return
       }
 
-      // Force exact 1024x1024 square required by the game engine
       const TARGET_SIZE = 1024
       canvas.width = TARGET_SIZE
       canvas.height = TARGET_SIZE
 
-      // Calculate perfect center crop to prevent stretching
       const minDim = Math.min(img.width, img.height)
       const startX = (img.width - minDim) / 2
       const startY = (img.height - minDim) / 2
 
-      // Draw: source X, Y, W, H -> destination X, Y, W, H
       ctx.drawImage(
         img, 
         startX, startY, minDim, minDim, 
         0, 0, TARGET_SIZE, TARGET_SIZE
       )
 
-      // Export as a compressed WebP at 80% quality
       resolve(canvas.toDataURL('image/webp', 0.8))
     }
 
@@ -81,7 +75,6 @@ function base64ToBlob(dataUrl: string): Blob {
 export const assetDb = {
   async saveFile(key: string, file: File | Blob): Promise<void> {
     try {
-      // Use the new compressor here!
       const base64String = await compressImageToBase64(file)
 
       // ATTEMPT 1: The Standard IndexedDB Engine
@@ -96,12 +89,11 @@ export const assetDb = {
         })
         console.log(`[assetDb] Successfully saved ${key} to IndexedDB.`)
         return 
-      } catch (idbError) {
+      } catch {
         console.warn(`[assetDb] IndexedDB threw an Internal Error. Executing fallback protocol...`)
       }
 
       // ATTEMPT 2: The Bulletproof LocalStorage Fallback
-      // Now that the image is a tiny WebP, it will easily fit inside the 5MB limit.
       try {
         localStorage.setItem(`asset_fallback_${key}`, base64String)
         console.log(`[assetDb] Successfully saved compressed ${key} to LocalStorage fallback.`)
@@ -146,17 +138,25 @@ export const assetDb = {
   async getAllFiles(): Promise<Record<string, Blob>> {
     const records: Record<string, Blob> = {}
 
+    // 1. Gather all LocalStorage fallback images (Crash-Proof Self-Healing)
     for (let i = 0; i < localStorage.length; i++) {
       const lsKey = localStorage.key(i)
       if (lsKey && lsKey.startsWith('asset_fallback_')) {
         const originalKey = lsKey.replace('asset_fallback_', '')
         const data = localStorage.getItem(lsKey)
-        if (data) {
-          records[originalKey] = base64ToBlob(data)
+        
+        if (data && data.startsWith('data:')) {
+          try {
+            records[originalKey] = base64ToBlob(data)
+          } catch (decodeError) {
+            console.error(`[assetDb] Corrupted file found and deleted: ${lsKey}`, decodeError)
+            localStorage.removeItem(lsKey) // Self-healing purge
+          }
         }
       }
     }
 
+    // 2. Gather IndexedDB images safely
     try {
       const db = await openDb()
       await new Promise<void>((resolve, reject) => {
@@ -179,7 +179,7 @@ export const assetDb = {
         tx.onerror = () => { db.close(); reject(tx.error) }
       })
     } catch (error) {
-      console.warn(`[assetDb] IndexedDB bulk read failed (Fallback data was still safely loaded):`, error)
+      console.warn(`[assetDb] IndexedDB bulk read failed.`, error)
     }
 
     return records

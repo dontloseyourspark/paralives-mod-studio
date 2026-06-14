@@ -22,11 +22,21 @@ export default function WorkspaceHeader({
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
 
-  const registerFileInCache  = useModStore((s) => s.registerFileInCache)
-  const stringUrlCache       = useModStore((s) => s.stringUrlCache)
+  const registerFileInCache = useModStore((s) => s.registerFileInCache)
+  const stringUrlCache      = useModStore((s) => s.stringUrlCache)
 
-  // DIRECT REACTIVE LOOKUP: No boolean gatekeepers needed anymore!
-  const thumbnailUrl = project.coverThumbnailKey ? stringUrlCache[project.coverThumbnailKey] : null
+  // If it's not in RAM, instantly rip it directly from the hard drive!
+  const thumbnailUrl = project.coverThumbnailKey 
+    ? stringUrlCache[project.coverThumbnailKey] || localStorage.getItem(`asset_fallback_${project.coverThumbnailKey}`)
+    : null
+
+  // --- TELEMETRY DEBUG BLOCK ---
+  const debugLoadedImages = Object.keys(stringUrlCache).length
+  const debugProjectKey = project.coverThumbnailKey || 'NULL'
+  const diskImageExists = project.coverThumbnailKey 
+    ? !!localStorage.getItem(`asset_fallback_${project.coverThumbnailKey}`) 
+    : false
+  // -----------------------------
 
   const handleThumbnailFile = (file: File) => {
     const key = `cover_${project.id}`
@@ -54,7 +64,7 @@ export default function WorkspaceHeader({
         </button>
 
        <div className="flex flex-col min-w-0">
-          <span className="text-[10px] text-gray-500 font-mono mt-0.5 tracking-tight">
+          <span className="text-[10px] text-gray-500 font-mono mt-0.5 tracking-tight flex items-center">
             Now editing mod project:
           </span>
           <input
