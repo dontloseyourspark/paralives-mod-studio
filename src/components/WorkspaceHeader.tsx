@@ -30,14 +30,6 @@ export default function WorkspaceHeader({
     ? stringUrlCache[project.coverThumbnailKey] || localStorage.getItem(`asset_fallback_${project.coverThumbnailKey}`)
     : null
 
-  // --- TELEMETRY DEBUG BLOCK ---
-  const debugLoadedImages = Object.keys(stringUrlCache).length
-  const debugProjectKey = project.coverThumbnailKey || 'NULL'
-  const diskImageExists = project.coverThumbnailKey 
-    ? !!localStorage.getItem(`asset_fallback_${project.coverThumbnailKey}`) 
-    : false
-  // -----------------------------
-
   const handleThumbnailFile = (file: File) => {
     const key = `cover_${project.id}`
     registerFileInCache(key, file)
