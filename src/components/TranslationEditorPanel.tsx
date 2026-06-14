@@ -457,7 +457,7 @@ export default function TranslationEditorPanel() {
               onClick={() => { setActiveLangIndex(i); setSelectedCategory('all'); setDisplayLimit(50) }}
               className={`text-xs font-bold uppercase shrink-0 transition-colors ${activeLangIndex === i ? 'text-[#8b5cf6]' : 'text-gray-500 hover:text-gray-400'}`}
             >
-              {t.language} ({progress.completed}/{progress.total})
+              ALL STRINGS ({progress.completed}/{progress.total})
             </button>
           ))}
         </div>

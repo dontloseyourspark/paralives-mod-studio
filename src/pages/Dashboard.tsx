@@ -20,6 +20,10 @@ export default function Dashboard() {
   // Grab the safe URL fetcher we fixed in the store
   const getBlobUrlFromCache = useModStore((s) => s.getBlobUrlFromCache)
 
+  const totalStrings = Object.keys(englishReference).length
+  const countCompleted = (project: ModProject) =>
+    Object.values(project.translations?.[0]?.strings ?? {}).filter((v) => v && v.trim().length > 0).length
+
   const [wizardOpen, setWizardOpen] = useState(false)
   const [toast, setToast] = useState<{ message: string; type: 'error' | 'info' | 'success' } | null>(null)
 
@@ -172,7 +176,7 @@ export default function Dashboard() {
                         {project.name || 'Untitled Mod'}
                       </h3>
                       <p className="text-xs text-gray-500 m-0 truncate">
-                        {project.author || '—'} · v{project.version || '1.0.0'} · {project?.items?.length ?? 0} items
+                        {project.author || '—'} · v{project.version || '1.0.0'} · {project.translations?.length ? `${countCompleted(project)}/${totalStrings} strings` : `${project?.items?.length ?? 0} items`}
                       </p>
                     </div>
 
@@ -222,7 +226,11 @@ export default function Dashboard() {
                       <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px] pt-2 border-t border-white/5">
                         <div className="flex items-center gap-1.5"><span className="text-gray-500">Author</span><strong className="text-gray-300 font-semibold truncate">{project.author || '—'}</strong></div>
                         <div className="flex items-center gap-1.5"><span className="text-gray-500">Version</span><strong className="text-gray-300 font-semibold">{project.version || '1.0.0'}</strong></div>
-                        <div className="flex items-center gap-1.5"><span className="text-gray-500">Items</span><strong className="text-gray-300 font-semibold">{project?.items?.length ?? 0}</strong></div>
+                        {project.translations?.length ? (
+                          <div className="flex items-center gap-1.5"><span className="text-gray-500">Strings</span><strong className="text-gray-300 font-semibold">{countCompleted(project)}/{totalStrings}</strong></div>
+                        ) : (
+                          <div className="flex items-center gap-1.5"><span className="text-gray-500">Items</span><strong className="text-gray-300 font-semibold">{project?.items?.length ?? 0}</strong></div>
+                        )}
                         <div className="flex items-center gap-1.5"><span className="text-gray-500">Modified</span><strong className="text-gray-300 font-semibold">{project.updatedAt ? new Date(project.updatedAt).toLocaleDateString() : '—'}</strong></div>
                       </div>
                     </div>
