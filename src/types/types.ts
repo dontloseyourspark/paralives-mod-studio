@@ -29,6 +29,7 @@ export interface Item {
 
 export interface ModProject {
   id: string
+  modGuid?: string   // Paralives ModGUID from _mod.meta — stable across export/re-import
   name: string
   description: string
   version: string

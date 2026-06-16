@@ -383,7 +383,8 @@ export default function TranslationEditorPanel() {
     const zip = new JSZip()
     const lang = activeTranslation.language
 
-    const stableNumericGuid = currentProject.id.replace(/[^0-9]/g, '').substring(0, 19).padEnd(19, '5')
+    const stableNumericGuid = currentProject.modGuid
+      ?? currentProject.id.replace(/[^0-9]/g, '').substring(0, 19).padEnd(19, '5')
     const modFolderName = `${lang}translation_${stableNumericGuid}.mod`
     const root = zip.folder(modFolderName)
     if (!root) return

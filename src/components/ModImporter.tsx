@@ -3,7 +3,7 @@ import React, { useState } from 'react'
 import { Folder, UploadSimple } from 'phosphor-react'
 import JSZip from 'jszip'
 import { useModStore } from '../store/useModStore'
-import type { ModProject, TranslationData } from '../types/types'
+import type { ModProject, TranslationData, ComponentNode } from '../types/types'
 
 interface ModImporterProps {
   onImportComplete: (project: ModProject) => void
@@ -17,7 +17,8 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
     let itemsSettingContent = ''
     let translationsSettingContent = ''
     let detectedLanguageName = 'Unknown'
-    
+    let detectedModGuid: string | null = null
+
     const componentSettings: Record<string, string> = {}
     const prefabContents: Record<string, string> = {}
     
@@ -72,6 +73,13 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
       const rootFolderMatch = path.match(/^([^/]+)\.mod\//i)
       if (rootFolderMatch && detectedLanguageName === 'Unknown') {
         detectedLanguageName = rootFolderMatch[1]
+      }
+
+      if (path.endsWith('.mod.meta')) {
+        const metaText = await entry.text()
+        const match = metaText.match(/^GUID:\s*(.+)$/m)
+        if (match) detectedModGuid = match[1].trim()
+        continue
       }
 
       if (path.endsWith('Items.setting')) {
@@ -185,8 +193,8 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
 
     const parsePrefabGraph = (text: string) => {
       const lines = text.split('\n')
-      const components: any[] = []
-      let currentComponent: any = null
+      const components: ComponentNode[] = []
+      let currentComponent: ComponentNode | null = null
 
       lines.forEach((rawLine) => {
         const line = rawLine.trim()
@@ -289,8 +297,11 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
       })
     }
 
+    const resolvedModGuid = detectedModGuid ?? itemsMeta[0]?.modGuid ?? undefined
+
     const synthesizedProject: ModProject = {
       id: crypto.randomUUID(),
+      modGuid: resolvedModGuid,
       name: parsedItems[0]?.name || detectedLanguageName || 'Imported Mod',
       description: 'Imported Paralives engine mod configuration.',
       version: '1.0.0',
