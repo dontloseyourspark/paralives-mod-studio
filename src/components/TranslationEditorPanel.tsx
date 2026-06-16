@@ -115,6 +115,16 @@ function parseCSV(text: string): string[][] {
         } else {
           inQuotes = false
         }
+      } else if (char === '\n' || char === '\r') {
+        // ← NEW: hard row boundary even inside quotes
+        // Translation strings are single-line; this prevents cascade failures
+        // from malformed inner quotes corrupting all subsequent rows.
+        currentRow.push(currentCell)
+        rows.push(currentRow)
+        currentRow = []
+        currentCell = ''
+        inQuotes = false
+        if (char === '\r' && i + 1 < text.length && text[i + 1] === '\n') i++
       } else {
         currentCell += char
       }
@@ -346,24 +356,49 @@ export default function TranslationEditorPanel() {
 
     const reader = new FileReader()
     reader.onload = (event) => {
-      const text = event.target?.result as string
-      const parsedRows = parseCSV(text)
-      if (parsedRows.length < 2) return
+    let text = event.target?.result as string
+    text = text.replace(/^\uFEFF/, '') // ← strip UTF-8 BOM (Excel/Sheets default)
+    const parsedRows = parseCSV(text)
+      
+      if (parsedRows.length < 1) return
 
-      const headers = parsedRows[0].map(h => h.trim().toLowerCase())
-      const guidIndex = headers.indexOf('guid')
-      let transIndex = headers.findIndex(h => h.includes('translation') || h.includes('kolom voor') || h.includes('value'))
-      if (transIndex === -1 || transIndex === guidIndex) transIndex = 2
+      const firstRow = parsedRows[0].map(h => h.trim().toLowerCase())
+      let guidIndex = firstRow.indexOf('guid')
+      let transIndex = firstRow.findIndex(h => h.includes('translation') || h.includes('kolom voor') || h.includes('value'))
+      let startRow = 1
 
-      if (guidIndex === -1) return
+      // Handle headerless CSVs: Check if the first row is actually data
+      // Paralives GUIDs typically start with 'g' followed by numbers
+      if (guidIndex === -1 && /^g?\d+$/.test(firstRow[0])) {
+        guidIndex = 0
+        startRow = 0 // Read from the very first row
+      }
+
+      
+
+      if (guidIndex === -1) {
+        alert('Could not detect a valid GUID column in the CSV.')
+        return
+      }
+
+      // If the translation column isn't explicitly named, default to index 3 (the 4th column).
+      // If the CSV has fewer columns, fall back to index 2.
+      if (transIndex === -1 || transIndex === guidIndex) {
+        transIndex = parsedRows[0].length >= 4 ? 3 : 2
+      }
 
       const newStrings = { ...activeTranslation.strings }
-      for (let i = 1; i < parsedRows.length; i++) {
+      for (let i = startRow; i < parsedRows.length; i++) {
         const row = parsedRows[i]
+        
+        // Ensure the row actually contains data up to the targeted indexes
         if (row.length > Math.max(guidIndex, transIndex)) {
           let guid = row[guidIndex].trim()
           if (!guid) continue
+          
+          // Normalize the GUID format
           if (!guid.startsWith('g') && /^\d+$/.test(guid)) guid = 'g' + guid
+          
           newStrings[guid] = row[transIndex]
         }
       }
@@ -376,7 +411,7 @@ export default function TranslationEditorPanel() {
         updatedAt: new Date().toISOString()
       })
     }
-    reader.readAsText(file)
+    reader.readAsText(file, 'UTF-8')
   }
 
   const handleExportMod = async () => {
