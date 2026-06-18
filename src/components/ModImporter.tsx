@@ -3,6 +3,7 @@ import React, { useState } from 'react'
 import { Folder, UploadSimple } from 'phosphor-react'
 import JSZip from 'jszip'
 import { useModStore } from '../store/useModStore'
+import { assetDb } from '../utils/assetDb'
 import type { ModProject, TranslationData, ComponentNode, ModType } from '../types/types'
 
 interface ModImporterProps {
@@ -14,6 +15,26 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
   const registerFileInCache = useModStore((state) => state.registerFileInCache)
 
   const processFiles = async (fileList: FileList | File[]) => {
+
+    // Generate the project ID up front so the cover key can reference it
+    // during the scan loop — keeps cover_${id} consistent with how
+    // manually uploaded covers are keyed
+    const newProjectId = crypto.randomUUID()
+
+    // Purge all keys from previous import sessions before writing new ones.
+    // Keeps cover_ keys (they're per-project and should persist across sessions).
+    // Purges everything else: item_thumb_*, PROJECT_COVER_MASTER, texture keys.
+    const existingKeys = await assetDb.listKeys()
+    await Promise.all(
+      existingKeys
+        .filter(k =>
+          k.startsWith('item_thumb_') ||
+          k === 'PROJECT_COVER_MASTER' ||
+          (!k.startsWith('cover_'))
+        )
+        .map(k => assetDb.deleteFile(k))
+    )
+
     let itemsSettingContent = ''
     let translationsSettingContent = ''
     let detectedLanguageName = 'Unknown'
@@ -117,9 +138,10 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
         continue
       }
 
-      // Await registration so IndexedDB write completes before we navigate away
+      // Key cover to project ID — same pattern as manually uploaded covers,
+      // so getBlobUrlFromCache finds it and the dashboard displays it correctly
       if (path.split('/').length === 2 && path.endsWith('.mod.thumbnail')) {
-        const coverKey = 'PROJECT_COVER_MASTER'
+        const coverKey = `cover_${newProjectId}`
         await registerFileInCache(coverKey, await entry.getFile())
         projectCoverKey = coverKey
         continue
@@ -269,8 +291,6 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
 
     // Register each thumbnail under a stable item GUID-based key, positionally matched.
     // Awaited in parallel so all IndexedDB writes finish before we call onImportComplete.
-    // Paralives thumbnail filenames are arbitrary (original source filenames),
-    // so we can't match by name — order in the folder matches order in Items.setting.
     const itemThumbnailKeys: Record<string, string> = {}
     await Promise.all(thumbnailFiles.map(async (file, i) => {
       const item = itemsMeta[i]
@@ -293,23 +313,19 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
       // Fall back to prefab file name, then generic label
       const trackingName = translatedName || prefabGuidToNameMap[targetGuid] || 'Imported Object'
 
-      // Stable key registered above — survives refresh via IndexedDB
       const matchedThumbnailKey = itemThumbnailKeys[metaItem.guid] ?? null
 
       const itemTextures: Record<string, string> = {}
       Object.keys(textureKeys).forEach(texName => {
-        if (texName.toLowerCase().includes('bucket') || texName.toLowerCase().includes('plastic')) {
-          const type = texName.endsWith('BaseColor') ? 'baseColor' :
-                       texName.endsWith('Normal') ? 'normal' :
-                       texName.endsWith('Roughness') ? 'roughness' : 'secondary'
-          itemTextures[type] = texName
-        }
+        const type = texName.endsWith('BaseColor') ? 'baseColor' :
+                     texName.endsWith('Normal') ? 'normal' :
+                     texName.endsWith('Roughness') ? 'roughness' : 'secondary'
+        itemTextures[type] = texName
       })
 
       return {
         id: crypto.randomUUID(),
         guid: metaItem.guid || crypto.randomUUID(),
-        // CamelCase split works on translated names like "ClutterPlasticBucket"
         name: trackingName.replace(/([A-Z])/g, ' $1').trim(),
         description: 'Imported Mod Object',
         price: metaItem.price !== undefined ? metaItem.price : 5,
@@ -330,12 +346,10 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
     }
 
     const resolvedModGuid = detectedModGuid ?? itemsMeta[0]?.modGuid ?? undefined
-
-    // Item mod if Items.setting had entries, otherwise translation-only
     const detectedModType: ModType = itemsMeta.length > 0 ? 'item' : 'translation'
 
     const synthesizedProject: ModProject = {
-      id: crypto.randomUUID(),
+      id: newProjectId,  // use the hoisted ID so cover_${newProjectId} matches
       modType: detectedModType,
       modGuid: resolvedModGuid,
       name: parsedItems[0]?.name || detectedLanguageName || 'Imported Mod',

@@ -24,9 +24,20 @@ export function useProjectWorkspace() {
 
   // ── Zustand persist hydration gate ────────────────────────────────────────
   // Wait for localStorage restore to complete before acting on store state.
-  const [storeReady, setStoreReady] = useState(
-    () => useModStore.persist.hasHydrated()
-  )
+  const [storeReady, setStoreReady] = useState(false)
+
+  useEffect(() => {
+    if (useModStore.persist.hasHydrated()) {
+      const t = setTimeout(() => setStoreReady(true), 0)
+      return () => clearTimeout(t)
+    }
+    const unsub = useModStore.persist.onFinishHydration(() => setStoreReady(true))
+    const fallback = setTimeout(() => setStoreReady(true), 300)
+    return () => {
+      unsub()
+      clearTimeout(fallback)
+    }
+  }, [])
 
   useEffect(() => {
     if (storeReady) return

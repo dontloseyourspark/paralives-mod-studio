@@ -135,6 +135,40 @@ export const assetDb = {
     }
   },
 
+  // Returns all keys currently stored in IndexedDB + localStorage fallback
+  async listKeys(): Promise<string[]> {
+    const keys: string[] = []
+
+    // localStorage fallback keys
+    for (let i = 0; i < localStorage.length; i++) {
+      const lsKey = localStorage.key(i)
+      if (lsKey && lsKey.startsWith('asset_fallback_')) {
+        keys.push(lsKey.replace('asset_fallback_', ''))
+      }
+    }
+
+    // IndexedDB keys
+    try {
+      const db = await openDb()
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readonly')
+        const req = tx.objectStore(STORE_NAME).getAllKeys()
+        req.onsuccess = () => {
+          db.close()
+          for (const k of req.result) {
+            if (!keys.includes(k as string)) keys.push(k as string)
+          }
+          resolve()
+        }
+        tx.onerror = () => { db.close(); reject(tx.error) }
+      })
+    } catch (error) {
+      console.warn(`[assetDb] listKeys IndexedDB read failed.`, error)
+    }
+
+    return keys
+  },
+
   async getAllFiles(): Promise<Record<string, Blob>> {
     const records: Record<string, Blob> = {}
 
@@ -150,7 +184,7 @@ export const assetDb = {
             records[originalKey] = base64ToBlob(data)
           } catch (decodeError) {
             console.error(`[assetDb] Corrupted file found and deleted: ${lsKey}`, decodeError)
-            localStorage.removeItem(lsKey) // Self-healing purge
+            localStorage.removeItem(lsKey)
           }
         }
       }

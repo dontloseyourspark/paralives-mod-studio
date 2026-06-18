@@ -239,8 +239,7 @@ export const useModStore = create<ModStoreState>()(
           }
         }),
 
-      // Now returns a Promise so callers can await the full IndexedDB write
-      // before navigating away — prevents race conditions on import
+      // Async so callers can await the full IndexedDB write before navigating away
       registerFileInCache: async (key, file) => {
         const freshUrl = URL.createObjectURL(file)
 
@@ -253,7 +252,8 @@ export const useModStore = create<ModStoreState>()(
       },
 
       getBlobUrlFromCache: (key) => {
-        if (!key || key === 'PROJECT_COVER_MASTER') return null
+        // Null key = no image
+        if (!key) return null
 
         const { stringUrlCache, binaryFileCache } = get()
 
