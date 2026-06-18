@@ -1,5 +1,7 @@
 // src/types/types.ts
 
+export type ModType = 'item' | 'translation' | 'surface'
+
 export interface ComponentNode {
   id: string
   type: string
@@ -29,7 +31,8 @@ export interface Item {
 
 export interface ModProject {
   id: string
-  modGuid?: string   // Paralives ModGUID from _mod.meta — stable across export/re-import
+  modType: ModType           // Determines which editor view loads
+  modGuid?: string           // Paralives ModGUID from _mod.meta — stable across export/re-import
   name: string
   description: string
   version: string
@@ -37,7 +40,7 @@ export interface ModProject {
   coverThumbnailKey: string | null
   items: Item[]
   assets: any[]
-  translations?: TranslationData[] // Added translation array
+  translations?: TranslationData[]
   createdAt: string
   updatedAt: string
 }

@@ -1,5 +1,7 @@
+// src/components/WorkspaceCanvas.tsx
 import { useState } from 'react'
 import { Plus, Trash } from 'phosphor-react'
+import { useModStore } from '../store/useModStore'
 import ItemsPanel from './ItemsPanel'
 import ItemEditorPanel from './ItemEditorPanel'
 import CreateModWizard, { type TranslationWizardPayload } from './CreateModWizard'
@@ -7,7 +9,7 @@ import TranslationEditorPanel from './TranslationEditorPanel'
 import type { Item, ModProject } from '../types/types'
 
 interface WorkspaceCanvasProps {
-  project?: ModProject // Added to read translation metadata
+  project?: ModProject
   items: Item[]
   selectedItemId: string | null
   activeSelectedItem: Item | null
@@ -16,6 +18,7 @@ interface WorkspaceCanvasProps {
   onDeleteItem: (itemId: string) => void
   onSaveItem: (updatedItem: Item) => void
   onWizardAdvancedEditing: (partial: Partial<Item> | TranslationWizardPayload) => void
+  onProjectChange: (updated: ModProject) => void
 }
 
 export default function WorkspaceCanvas({
@@ -27,22 +30,41 @@ export default function WorkspaceCanvas({
   onDeleteItem,
   onSaveItem,
   onWizardAdvancedEditing,
+  onProjectChange,
 }: WorkspaceCanvasProps) {
   const [wizardOpen, setWizardOpen] = useState(false)
+  const registerFileInCache = useModStore((s) => s.registerFileInCache)
+  const stringUrlCache = useModStore((s) => s.stringUrlCache)
 
-  const hasTranslations = project?.translations && project.translations.length > 0
-  const isPureTranslationMod = hasTranslations && items.length === 0
+  // Drive layout entirely from modType
+  const modType = project?.modType ?? (items.length > 0 ? 'item' : 'translation')
+  const showItemsPanel = modType === 'item' || modType === 'surface'
+  const showTranslationEditor = modType === 'translation'
+
+  // Resolve cover URL the same way WorkspaceHeader does — RAM first, then localStorage
+  const coverThumbnailUrl = project?.coverThumbnailKey
+    ? stringUrlCache[project.coverThumbnailKey] ?? localStorage.getItem(`asset_fallback_${project.coverThumbnailKey}`)
+    : null
+
+  const handleCoverUpload = (file: File) => {
+    if (!project) return
+    const key = `cover_${project.id}`
+    registerFileInCache(key, file)
+    onProjectChange({ ...project, coverThumbnailKey: key })
+  }
 
   return (
     <div className="flex-1 flex min-h-0 relative">
 
-      {/* Conditionally hide the 3D items sidebar if this is strictly a translation mod */}
-      {!isPureTranslationMod && (
+      {/* Items sidebar — only shown for item and surface mods */}
+      {showItemsPanel && (
         <div className="relative h-full flex flex-col shrink-0">
           <ItemsPanel
             items={items}
             selectedItemId={selectedItemId}
             onSelectItem={onSelectItem}
+            coverThumbnailUrl={coverThumbnailUrl}
+            onCoverUpload={handleCoverUpload}
           />
 
           <div className="absolute bottom-3 left-3 right-3 flex gap-2 select-none">
@@ -67,9 +89,9 @@ export default function WorkspaceCanvas({
         </div>
       )}
 
-      {/* Main column */}
+      {/* Main panel — driven by modType */}
       <main className="flex-1 h-full min-w-0 bg-[#0e1017]">
-        {hasTranslations ? (
+        {showTranslationEditor ? (
           <TranslationEditorPanel />
         ) : (
           <ItemEditorPanel

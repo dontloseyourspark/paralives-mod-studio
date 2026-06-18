@@ -16,8 +16,6 @@ export default function Dashboard() {
   const recentProjects      = useModStore((s) => s.recentProjects)
   const setProject          = useModStore((s) => s.setProject)
   const addItemWith         = useModStore((s) => s.addItemWith)
-  
-  // Grab the safe URL fetcher we fixed in the store
   const getBlobUrlFromCache = useModStore((s) => s.getBlobUrlFromCache)
 
   const totalStrings = Object.keys(englishReference).length
@@ -51,6 +49,7 @@ export default function Dashboard() {
       
       const updatedProject = {
         ...project,
+        modType: 'translation' as const,
         name: `${payload.language} Translation`, 
         translations: [newTranslation],
         updatedAt: new Date().toISOString()
@@ -152,10 +151,10 @@ export default function Dashboard() {
             {/* Small screens: compact rows */}
             <div className="flex flex-col gap-3 lg:hidden">
               {recentProjects.map((project) => {
-                // Safely grab the URL using our fixed store function
-                const liveCoverUrl = project.coverThumbnailKey 
-                  ? getBlobUrlFromCache(project.coverThumbnailKey) 
+                const liveCoverUrl = project.coverThumbnailKey
+                  ? getBlobUrlFromCache(project.coverThumbnailKey)
                   : null
+                const isTranslation = project.modType === 'translation'
 
                 return (
                   <div
@@ -176,7 +175,9 @@ export default function Dashboard() {
                         {project.name || 'Untitled Mod'}
                       </h3>
                       <p className="text-xs text-gray-500 m-0 truncate">
-                        {project.author || '—'} · v{project.version || '1.0.0'} · {project.translations?.length ? `${countCompleted(project)}/${totalStrings} strings` : `${project?.items?.length ?? 0} items`}
+                        {project.author || '—'} · v{project.version || '1.0.0'} · {isTranslation
+                          ? `${countCompleted(project)}/${totalStrings} strings`
+                          : `${project?.items?.length ?? 0} items`}
                       </p>
                     </div>
 
@@ -191,10 +192,10 @@ export default function Dashboard() {
             {/* Large screens: cards grid */}
             <div className="hidden lg:grid grid-cols-2 xl:grid-cols-3 gap-4">
               {recentProjects.map((project) => {
-                // Safely grab the URL using our fixed store function
-                const liveCoverUrl = project.coverThumbnailKey 
-                  ? getBlobUrlFromCache(project.coverThumbnailKey) 
+                const liveCoverUrl = project.coverThumbnailKey
+                  ? getBlobUrlFromCache(project.coverThumbnailKey)
                   : null
+                const isTranslation = project.modType === 'translation'
 
                 return (
                   <div
@@ -226,7 +227,7 @@ export default function Dashboard() {
                       <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px] pt-2 border-t border-white/5">
                         <div className="flex items-center gap-1.5"><span className="text-gray-500">Author</span><strong className="text-gray-300 font-semibold truncate">{project.author || '—'}</strong></div>
                         <div className="flex items-center gap-1.5"><span className="text-gray-500">Version</span><strong className="text-gray-300 font-semibold">{project.version || '1.0.0'}</strong></div>
-                        {project.translations?.length ? (
+                        {isTranslation ? (
                           <div className="flex items-center gap-1.5"><span className="text-gray-500">Strings</span><strong className="text-gray-300 font-semibold">{countCompleted(project)}/{totalStrings}</strong></div>
                         ) : (
                           <div className="flex items-center gap-1.5"><span className="text-gray-500">Items</span><strong className="text-gray-300 font-semibold">{project?.items?.length ?? 0}</strong></div>

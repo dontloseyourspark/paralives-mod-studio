@@ -67,7 +67,7 @@ export default function ProjectOverview() {
       />
 
       <WorkspaceCanvas
-        project={currentProject} // <--- ADD THIS LINE
+        project={currentProject}
         items={currentProject.items}
         selectedItemId={selectedItemId}
         activeSelectedItem={activeSelectedItem}
@@ -76,6 +76,7 @@ export default function ProjectOverview() {
         onDeleteItem={handleDeleteItem}
         onSaveItem={updateItem}
         onWizardAdvancedEditing={handleWizardAdvancedEditing}
+        onProjectChange={updateProject}
       />
     </div>
   )

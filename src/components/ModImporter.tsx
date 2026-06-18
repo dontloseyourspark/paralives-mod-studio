@@ -3,7 +3,7 @@ import React, { useState } from 'react'
 import { Folder, UploadSimple } from 'phosphor-react'
 import JSZip from 'jszip'
 import { useModStore } from '../store/useModStore'
-import type { ModProject, TranslationData, ComponentNode } from '../types/types'
+import type { ModProject, TranslationData, ComponentNode, ModType } from '../types/types'
 
 interface ModImporterProps {
   onImportComplete: (project: ModProject) => void
@@ -25,7 +25,8 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
     const prefabGuidToNameMap: Record<string, string> = {}
     const fileNameToTextMap: Record<string, string> = {}
     
-    const thumbnailKeys: string[] = []
+    // Thumbnails collected in order — matched positionally to items
+    const thumbnailFiles: File[] = []
     const textureKeys: Record<string, string> = {}
     let projectCoverKey: string | null = null
 
@@ -75,9 +76,10 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
         detectedLanguageName = rootFolderMatch[1]
       }
 
-      if (path.endsWith('.mod.meta')) {
+      // _mod.meta holds the stable ModGUID
+      if (path.endsWith('_mod.meta')) {
         const metaText = await entry.text()
-        const match = metaText.match(/^GUID:\s*(.+)$/m)
+        const match = metaText.match(/^ModGUID:\s*(.+)$/m)
         if (match) detectedModGuid = match[1].trim()
         continue
       }
@@ -101,23 +103,24 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
         continue
       }
 
-      if (path.includes('/_GeneratedThumbnails/Items/') && path.endsWith('.png')) {
-        const imageHash = fileName.replace('.png', '')
-        registerFileInCache(imageHash, await entry.getFile())
-        thumbnailKeys.push(imageHash)
+      // Collect generated item thumbnails in order — positionally matched to items later
+      if (path.includes('/_GeneratedThumbnails/') && path.endsWith('.png')) {
+        thumbnailFiles.push(await entry.getFile())
         continue
       }
 
+      // Await registration so IndexedDB write completes before we navigate away
       if (path.split('/').length === 2 && path.endsWith('.png')) {
         const textureKey = fileName.replace('.png', '')
-        registerFileInCache(textureKey, await entry.getFile())
+        await registerFileInCache(textureKey, await entry.getFile())
         textureKeys[textureKey] = textureKey
         continue
       }
 
+      // Await registration so IndexedDB write completes before we navigate away
       if (path.split('/').length === 2 && path.endsWith('.mod.thumbnail')) {
         const coverKey = 'PROJECT_COVER_MASTER'
-        registerFileInCache(coverKey, await entry.getFile())
+        await registerFileInCache(coverKey, await entry.getFile())
         projectCoverKey = coverKey
         continue
       }
@@ -178,7 +181,8 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
             if (currentItem) {
               if (key === 'GUID') currentItem.guid = value
               if (key === 'CustomModGUID') currentItem.modGuid = value
-              if (key === 'DisplayName') currentItem.name = value
+              // Store as displayNameGuid — it's a translation key, not the name itself
+              if (key === 'DisplayName') currentItem.displayNameGuid = value
               if (key === 'PriceOverride') currentItem.price = parseFloat(value) || 0
               if (key === 'Prefab') currentItem.targetPrefabGuid = value
               if (key === 'Value') currentItem.prefabFallbackName = value
@@ -258,12 +262,39 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
     const rootStates = extractAnchors(componentSettings['ItemObjectRoot'] || '')
     const meshSurfaces = extractAnchors(componentSettings['ItemMeshReference'] || '')
 
+    // Build translation map once outside the item loop
+    const translationMap = translationsSettingContent
+      ? parseTranslations(translationsSettingContent)
+      : {}
+
+    // Register each thumbnail under a stable item GUID-based key, positionally matched.
+    // Awaited in parallel so all IndexedDB writes finish before we call onImportComplete.
+    // Paralives thumbnail filenames are arbitrary (original source filenames),
+    // so we can't match by name — order in the folder matches order in Items.setting.
+    const itemThumbnailKeys: Record<string, string> = {}
+    await Promise.all(thumbnailFiles.map(async (file, i) => {
+      const item = itemsMeta[i]
+      if (!item) return
+      const stableKey = `item_thumb_${item.guid}`
+      await registerFileInCache(stableKey, file)
+      itemThumbnailKeys[item.guid] = stableKey
+    }))
+
     const parsedItems = itemsMeta.map((metaItem) => {
       const targetGuid = metaItem.targetPrefabGuid || ''
       const rawPrefabText = prefabContents[targetGuid] || ''
       const extractedComponents = rawPrefabText ? parsePrefabGraph(rawPrefabText) : []
-      const trackingName = metaItem.name || prefabGuidToNameMap[targetGuid] || 'Imported Object'
-      const matchedThumbnailKey = thumbnailKeys.find(k => k === metaItem.guid || k === targetGuid) || null
+
+      // Resolve display name via translation map using the stored GUID
+      const translatedName = metaItem.displayNameGuid
+        ? (translationMap[`g${metaItem.displayNameGuid}`] ?? translationMap[metaItem.displayNameGuid] ?? null)
+        : null
+
+      // Fall back to prefab file name, then generic label
+      const trackingName = translatedName || prefabGuidToNameMap[targetGuid] || 'Imported Object'
+
+      // Stable key registered above — survives refresh via IndexedDB
+      const matchedThumbnailKey = itemThumbnailKeys[metaItem.guid] ?? null
 
       const itemTextures: Record<string, string> = {}
       Object.keys(textureKeys).forEach(texName => {
@@ -278,12 +309,13 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
       return {
         id: crypto.randomUUID(),
         guid: metaItem.guid || crypto.randomUUID(),
+        // CamelCase split works on translated names like "ClutterPlasticBucket"
         name: trackingName.replace(/([A-Z])/g, ' $1').trim(),
         description: 'Imported Mod Object',
         price: metaItem.price !== undefined ? metaItem.price : 5,
         tags: ['Imported'],
-        thumbnailKey: matchedThumbnailKey, 
-        textureKeys: itemTextures, 
+        thumbnailKey: matchedThumbnailKey,
+        textureKeys: itemTextures,
         componentBlueprints: { rootDefaultStates: rootStates, materialSurfaces: meshSurfaces },
         components: extractedComponents
       }
@@ -299,14 +331,18 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
 
     const resolvedModGuid = detectedModGuid ?? itemsMeta[0]?.modGuid ?? undefined
 
+    // Item mod if Items.setting had entries, otherwise translation-only
+    const detectedModType: ModType = itemsMeta.length > 0 ? 'item' : 'translation'
+
     const synthesizedProject: ModProject = {
       id: crypto.randomUUID(),
+      modType: detectedModType,
       modGuid: resolvedModGuid,
       name: parsedItems[0]?.name || detectedLanguageName || 'Imported Mod',
       description: 'Imported Paralives engine mod configuration.',
       version: '1.0.0',
       author: 'Studio Creator',
-      coverThumbnailKey: projectCoverKey, 
+      coverThumbnailKey: projectCoverKey,
       items: parsedItems,
       assets: [],
       translations: parsedTranslations,

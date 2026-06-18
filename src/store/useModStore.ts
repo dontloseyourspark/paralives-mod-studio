@@ -2,7 +2,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { assetDb } from '../utils/assetDb'
-import type { ModProject, Item } from '../types/types'
+import type { ModProject, Item, ModType } from '../types/types'
 
 interface ModStoreState {
   currentProject: ModProject | null
@@ -15,14 +15,14 @@ interface ModStoreState {
 
   setProject: (project: ModProject) => void
   setSelectedItemId: (id: string | null) => void
-  createProject: () => ModProject
+  createProject: (modType?: ModType) => ModProject
   updateProject: (updatedProject: ModProject) => void
   saveProject: () => void
   addItemWith: (item: Item) => void
   updateItem: (updatedItem: Item) => void
   deleteItem: (itemId: string) => void
   updateTranslationString: (lang: string, key: string, value: string) => void
-  registerFileInCache: (key: string, file: File | Blob) => void
+  registerFileInCache: (key: string, file: File | Blob) => Promise<void>
   getBlobUrlFromCache: (key: string | null) => string | null
   hydrateCacheFromDisk: () => Promise<void>
   clearWorkspaceSession: () => void
@@ -80,9 +80,10 @@ export const useModStore = create<ModStoreState>()(
 
       setSelectedItemId: (id) => set({ selectedItemId: id }),
 
-      createProject: () => {
+      createProject: (modType: ModType = 'item') => {
         const newProject: ModProject = {
           id: crypto.randomUUID(),
+          modType,
           name: 'New Custom Mod',
           description: 'A fresh standalone Paralives content configuration package.',
           version: '1.0.0',
@@ -238,20 +239,20 @@ export const useModStore = create<ModStoreState>()(
           }
         }),
 
-      registerFileInCache: (key, file) => {
+      // Now returns a Promise so callers can await the full IndexedDB write
+      // before navigating away — prevents race conditions on import
+      registerFileInCache: async (key, file) => {
         const freshUrl = URL.createObjectURL(file)
-        
+
         set((state) => ({
           binaryFileCache: { ...state.binaryFileCache, [key]: file },
           stringUrlCache: { ...state.stringUrlCache, [key]: freshUrl }
         }))
 
-        assetDb.saveFile(key, file).catch((err) => {
-          console.error(`[Store:registerFileInCache] IndexedDB write failure: ${key}`, err)
-        })
+        await assetDb.saveFile(key, file)
       },
 
-    getBlobUrlFromCache: (key) => {
+      getBlobUrlFromCache: (key) => {
         if (!key || key === 'PROJECT_COVER_MASTER') return null
 
         const { stringUrlCache, binaryFileCache } = get()
@@ -259,11 +260,10 @@ export const useModStore = create<ModStoreState>()(
         // 1. Check RAM first
         if (stringUrlCache[key]) return stringUrlCache[key]
 
-        // 2. NEW: The Synchronous Cheat Code! 
-        // If it's on the disk, it's already a valid image URL. Use it instantly.
+        // 2. Synchronous fallback via localStorage
         const fallbackData = localStorage.getItem(`asset_fallback_${key}`)
         if (fallbackData) {
-          return fallbackData 
+          return fallbackData
         }
 
         // 3. Fallback for active session binaries
@@ -308,13 +308,20 @@ export const useModStore = create<ModStoreState>()(
         currentProject: state.currentProject,
         selectedItemId: state.selectedItemId,
       }),
-      merge: (persistedState: unknown, currentState) => ({
-        ...currentState,
-        ...(persistedState as Partial<ModStoreState>),
-        binaryFileCache: {},
-        stringUrlCache: {},
-        hasHydratedDisk: false,
-      }),
+      merge: (persistedState: unknown, currentState) => {
+        const ps = persistedState as Partial<ModStoreState>
+        // Backfill modType on any persisted projects that predate this field
+        const migrate = (p: ModProject): ModProject => ({ modType: 'item' as ModType, ...p })
+        return {
+          ...currentState,
+          ...ps,
+          recentProjects: (ps.recentProjects ?? []).map(migrate),
+          currentProject: ps.currentProject ? migrate(ps.currentProject) : null,
+          binaryFileCache: {},
+          stringUrlCache: {},
+          hasHydratedDisk: false,
+        }
+      },
     }
   )
 )
