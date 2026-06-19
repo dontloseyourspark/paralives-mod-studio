@@ -62,13 +62,12 @@ interface NodeAccordionProps {
 }
 
 function NodeAccordion({ item, selectedNodeKey, onSelectNode }: NodeAccordionProps) {
+  const [open, setOpen] = useState(true)
   const meshNodes = getMeshNodes(item.components || [])
   if (meshNodes.length === 0) return null
 
   const root = meshNodes.find(n => n.childIndex === undefined) ?? meshNodes[0]
   const children = meshNodes.filter(n => n !== root)
-
-  const [open, setOpen] = useState(true)
   const rootKey = `${root.id}_${root.type}`
 
   return (

@@ -96,9 +96,12 @@ export function useProjectWorkspace() {
     currentProject?.items.find((i) => i.id === selectedItemId) ?? null
 
   // ── Node selection (session-only, not persisted) ───────────────────────────
-  // Tracks which ComponentNode (by composite key id+type) is active in the
-  // left panel accordion. Resets to the root mesh node whenever the item changes.
-  const [selectedNodeKey, setSelectedNodeKey] = useState<string | null>(null)
+  // Tracks which ComponentNode (by composite key id+type) is active in the left
+  // panel accordion. A manual pick (handleSelectNode) is tagged with the item id
+  // it belongs to; selectedNodeKey falls back to the item's root node whenever
+  // that tag doesn't match the currently selected item (i.e. the item changed).
+  // This is a pure per-render derivation — no setState call during render needed.
+  const [nodeOverride, setNodeOverride] = useState<{ itemId: string | null; nodeKey: string } | null>(null)
 
   // Derive the root node key for a given item
   const getRootNodeKey = useCallback((item: Item | null): string | null => {
@@ -108,10 +111,10 @@ export function useProjectWorkspace() {
     return root ? `${root.id}_${root.type}` : null
   }, [])
 
-  // Auto-select root node when selected item changes
-  useEffect(() => {
-    setSelectedNodeKey(getRootNodeKey(activeSelectedItem))
-  }, [selectedItemId, activeSelectedItem, getRootNodeKey])
+  const selectedNodeKey =
+    nodeOverride && nodeOverride.itemId === selectedItemId
+      ? nodeOverride.nodeKey
+      : getRootNodeKey(activeSelectedItem)
 
   // Derive the active node from the key
   const activeSelectedNode: ComponentNode | null = (() => {
@@ -155,12 +158,12 @@ export function useProjectWorkspace() {
 
   const handleSelectItem = (item: Item) => {
     setSelectedItemId(item.id)
-    // Node auto-selection happens via the useEffect above
+    // Node falls back to the new item's root automatically — see selectedNodeKey derivation above
   }
 
   const handleSelectNode = useCallback((node: ComponentNode) => {
-    setSelectedNodeKey(`${node.id}_${node.type}`)
-  }, [])
+    setNodeOverride({ itemId: selectedItemId, nodeKey: `${node.id}_${node.type}` })
+  }, [selectedItemId, setNodeOverride])
 
   const handleWizardAdvancedEditing = (partial: Partial<Item> | TranslationWizardPayload) => {
     if ('isTranslation' in partial) return

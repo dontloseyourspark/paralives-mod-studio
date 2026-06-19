@@ -36,7 +36,7 @@ export default function App() {
     console.log("🚀 Firing database hydration...")
     useModStore.setState({ hasHydratedDisk: false })
     hydrateCacheFromDisk()
-  }, [persistReady])
+  }, [persistReady, hydrateCacheFromDisk])
 
   if (!persistReady || !hasHydratedDisk) {
     return (

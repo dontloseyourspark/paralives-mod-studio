@@ -311,7 +311,7 @@ export const useModStore = create<ModStoreState>()(
       merge: (persistedState: unknown, currentState) => {
         const ps = persistedState as Partial<ModStoreState>
         // Backfill modType on any persisted projects that predate this field
-        const migrate = (p: ModProject): ModProject => ({ modType: 'item' as ModType, ...p })
+        const migrate = (p: ModProject): ModProject => ({ ...p, modType: p.modType ?? ('item' as ModType) })
         return {
           ...currentState,
           ...ps,

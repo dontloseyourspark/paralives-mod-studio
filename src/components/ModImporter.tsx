@@ -4,7 +4,7 @@ import { Folder, UploadSimple } from 'phosphor-react'
 import JSZip from 'jszip'
 import { useModStore } from '../store/useModStore'
 import { assetDb } from '../utils/assetDb'
-import type { ModProject, TranslationData, ComponentNode, ModType } from '../types/types'
+import type { ModProject, TranslationData, ComponentNode, ModType, PrefabPropertyValue } from '../types/types'
 
 interface ModImporterProps {
   onImportComplete: (project: ModProject) => void
@@ -179,12 +179,26 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
 
     // 3. Parsers
 
-    const parseParalivesSetting = (text: string) => {
-      const lines = text.split('\n')
-      const itemsList: any[] = []
-      let currentItem: any = null
+    // Raw item record parsed from Items.setting, before synthesis into a full Item.
+    interface RawItemMeta {
+      guid?: string
+      modGuid?: string
+      displayNameGuid?: string
+      price?: number
+      targetPrefabGuid?: string
+      prefabFallbackName?: string
+      variantGuids: string[]
+      tags: string[]
+    }
 
-      lines.forEach((rawLine) => {
+    const parseParalivesSetting = (text: string): RawItemMeta[] => {
+      const lines = text.split('\n')
+      const itemsList: RawItemMeta[] = []
+      let currentItem: RawItemMeta | null = null
+
+      // Plain for-loop (not .forEach) so TypeScript can track currentItem's
+      // narrowed type across iterations and after the loop ends.
+      for (const rawLine of lines) {
         const line = rawLine.trim()
 
         if (line.startsWith('@')) {
@@ -217,7 +231,7 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
             }
           }
         }
-      })
+      }
 
       if (currentItem && currentItem.guid) itemsList.push(currentItem)
       return itemsList
@@ -423,20 +437,23 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
           // Skip GUID/Value/AssetMesh — these are mesh-registry entries, not component props
           if (pKey === 'GUID' || pKey === 'Value' || pKey === 'AssetMesh') continue
 
-          // Promote the parent property to an object so it can hold sub-properties
+          // Promote the parent property to an object so it can hold sub-properties.
+          // Use a separately-typed `bag` reference (rather than re-indexing the
+          // PrefabPropertyValue union below) so TS knows it's safe to write subkeys into.
           const parent = currentComponent.properties[lastIndent1Key]
-          if (typeof parent !== 'object' || parent === null || Array.isArray(parent)) {
-            // Preserve the original scalar value under _value
-            currentComponent.properties[lastIndent1Key] = { _value: parent }
-          }
+          const bag: Record<string, PrefabPropertyValue | undefined> =
+            typeof parent === 'object' && parent !== null && !Array.isArray(parent)
+              ? parent
+              : { _value: parent } // Preserve the original scalar value under _value
+          currentComponent.properties[lastIndent1Key] = bag
 
           if (pValue.startsWith('(') && pValue.endsWith(')')) {
-            currentComponent.properties[lastIndent1Key][pKey] = pValue
+            bag[pKey] = pValue
               .replace(/[()]/g, '')
               .split(',')
               .map(n => parseFloat(n.trim()) || 0)
           } else {
-            currentComponent.properties[lastIndent1Key][pKey] = isNaN(Number(pValue))
+            bag[pKey] = isNaN(Number(pValue))
               ? pValue
               : parseFloat(pValue)
           }
@@ -493,7 +510,7 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
     const itemThumbnailKeys: Record<string, string> = {}
     await Promise.all(thumbnailFiles.map(async (file, i) => {
       const item = itemsMeta[i]
-      if (!item) return
+      if (!item || !item.guid) return
       const stableKey = `item_thumb_${item.guid}`
       await registerFileInCache(stableKey, file)
       itemThumbnailKeys[item.guid] = stableKey
@@ -512,7 +529,7 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
       // Fall back to prefab file name, then generic label
       const trackingName = translatedName || prefabGuidToNameMap[targetGuid] || 'Imported Object'
 
-      const matchedThumbnailKey = itemThumbnailKeys[metaItem.guid] ?? null
+      const matchedThumbnailKey = itemThumbnailKeys[metaItem.guid ?? ''] ?? null
 
       return {
         id: crypto.randomUUID(),
