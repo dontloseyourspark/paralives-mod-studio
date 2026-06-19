@@ -22,13 +22,16 @@ export default function ProjectOverview() {
   const {
     currentProject,
     selectedItemId,
+    selectedNodeKey,
     activeSelectedItem,
+    activeSelectedNode,
     isSaving,
     isRehydrating,
     updateProject,
     updateItem,
     handleDeleteItem,
     handleSelectItem,
+    handleSelectNode,
     handleWizardAdvancedEditing,
     handleSaveProject,
     handleBackToDashboard,
@@ -70,8 +73,11 @@ export default function ProjectOverview() {
         project={currentProject}
         items={currentProject.items}
         selectedItemId={selectedItemId}
+        selectedNodeKey={selectedNodeKey}
         activeSelectedItem={activeSelectedItem}
+        activeSelectedNode={activeSelectedNode}
         onSelectItem={handleSelectItem}
+        onSelectNode={handleSelectNode}
         onAddItem={() => {}}
         onDeleteItem={handleDeleteItem}
         onSaveItem={updateItem}

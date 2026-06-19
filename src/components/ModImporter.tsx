@@ -21,8 +21,10 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
     // manually uploaded covers are keyed
     const newProjectId = crypto.randomUUID()
 
+    // Purge all keys from previous import sessions before writing new ones.
+    // Keeps cover_ keys (they're per-project and should persist across sessions).
+    // Purges everything else: item_thumb_*, texture keys, etc.
     const existingKeys = await assetDb.listKeys()
-    console.log('[DEBUG] keys before purge:', existingKeys)
     await Promise.all(
       existingKeys
         .filter(k =>
@@ -32,7 +34,6 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
         )
         .map(k => assetDb.deleteFile(k))
     )
-    console.log('[DEBUG] purge complete')
 
     let itemsSettingContent = ''
     let translationsSettingContent = ''
@@ -188,7 +189,7 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
 
         if (line.startsWith('@')) {
           if (currentItem && currentItem.guid) itemsList.push(currentItem)
-          currentItem = { tags: [] }
+          currentItem = { tags: [], variantGuids: [] }
         }
 
         if (line.startsWith('=')) {
@@ -207,6 +208,12 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
               if (key === 'PriceOverride') currentItem.price = parseFloat(value) || 0
               if (key === 'Prefab') currentItem.targetPrefabGuid = value
               if (key === 'Value') currentItem.prefabFallbackName = value
+              // Collect variant GUIDs — these are the GUIDs of all items in this variant group,
+              // including the parent itself. Used to build the accordion grouping in ItemsPanel.
+              if (key === 'ItemVariantGUID') {
+                currentItem.variantGuids = currentItem.variantGuids || []
+                currentItem.variantGuids.push(value)
+              }
             }
           }
         }
@@ -232,9 +239,13 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
 
       let currentNodeGuid = ''
       let currentNodeName = ''
+      let currentNodeChildIndex: number | undefined = undefined
       let currentComponent: ComponentNode | null = null
       let inSurfacesBlock = false
       let currentSurface: { guid: string; value: string } | null = null
+      // Tracks the last indent-1 property key so indent-2 lines can be attached
+      // to it as sub-properties rather than being dropped or flattened incorrectly.
+      let lastIndent1Key: string | null = null
 
       const flushComponent = () => {
         if (!currentComponent) return
@@ -249,6 +260,7 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
         components.push(currentComponent)
         currentComponent = null
         inSurfacesBlock = false
+        lastIndent1Key = null
       }
 
       for (const rawLine of lines) {
@@ -262,8 +274,10 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
           flushComponent()
           currentNodeGuid = ''
           currentNodeName = ''
+          currentNodeChildIndex = undefined
           inSurfacesBlock = false
           currentSurface = null
+          lastIndent1Key = null
           continue
         }
 
@@ -273,6 +287,7 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
           flushComponent()
           currentNodeGuid = itemObjMatch[1]
           currentNodeName = ''
+          currentNodeChildIndex = undefined
           inSurfacesBlock = false
           currentSurface = null
           continue
@@ -284,8 +299,15 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
           continue
         }
 
-        // Structural node metadata — skip
-        if (!currentComponent && (line.startsWith('ParentGUID:') || line.startsWith('ChildIndex:'))) {
+        // ParentGUID: — structural metadata, skip
+        if (!currentComponent && line.startsWith('ParentGUID:')) {
+          continue
+        }
+
+        // ChildIndex: — capture for disambiguation of same-named child nodes
+        if (!currentComponent && line.startsWith('ChildIndex:')) {
+          const idx = parseInt(line.substring(11).trim(), 10)
+          if (!isNaN(idx)) currentNodeChildIndex = idx
           continue
         }
 
@@ -304,11 +326,13 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
             id: currentNodeGuid || crypto.randomUUID(),
             type: line.replace(':', ''),
             nodeName: currentNodeName || undefined,
+            childIndex: currentNodeChildIndex,
             properties: {},
             surfaces: [],
           }
           inSurfacesBlock = false
           currentSurface = null
+          lastIndent1Key = null
           continue
         }
 
@@ -317,6 +341,7 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
         // ' Surfaces:' at indent 1 — enter surface block
         if (indent === 1 && line === 'Surfaces:') {
           inSurfacesBlock = true
+          lastIndent1Key = null
           continue
         }
 
@@ -351,8 +376,20 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
           }
         }
 
-        // Flat properties at indent 1 — direct properties on the component
-        // e.g. ColorZoneMap:, DetailMap:, MeshIndex:, LocalScale:
+        // ── Property parsing (indent 1 and indent 2) ──────────────────────
+        //
+        // Indent-1 lines are direct properties on the component.
+        // Indent-2 lines are sub-properties of the most recent indent-1 key.
+        //
+        // When a property has sub-properties, it's stored as an object:
+        //   { _value: 'True', ScalableAxes: 'bool3(...)', HasMinScale: 'True', MinScale: 0.0135 }
+        // When it has no sub-properties, it's stored as a plain value:
+        //   'True' | 0.0135 | [0.5, 0.5, 0.5]
+        //
+        // This preserves all values from the prefab including nested ones like
+        // SurfaceCanBeNotFlat (under ItemCanBeStackedOn) and ScalableAxes/
+        // HasMinScale/MinScale/HasMaxScale/MaxScale (under IsScalable).
+
         if (indent === 1 && line.includes(':') && !inSurfacesBlock) {
           const cleanProp = line.startsWith('=') ? line.substring(1) : line
           const sepIndex = cleanProp.indexOf(':')
@@ -360,16 +397,50 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
           const pKey = cleanProp.substring(0, sepIndex).trim()
           const pValue = cleanProp.substring(sepIndex + 1).trim()
           if (pKey === 'GUID' || pKey === 'Value') continue
-          if (pValue.startsWith('(') && pValue.endsWith(')')) {
+
+          lastIndent1Key = pKey
+
+          if (pValue === '') {
+            // Sub-block opener with no value (e.g. ItemMeshReferences:) — null placeholder
+            currentComponent.properties[pKey] = null
+          } else if (pValue.startsWith('(') && pValue.endsWith(')')) {
             currentComponent.properties[pKey] = pValue
               .replace(/[()]/g, '')
               .split(',')
               .map(n => parseFloat(n.trim()) || 0)
           } else {
-            currentComponent.properties[pKey] = isNaN(Number(pValue))
+            currentComponent.properties[pKey] = isNaN(Number(pValue)) ? pValue : parseFloat(pValue)
+          }
+          continue
+        }
+
+        if (indent === 2 && line.includes(':') && !inSurfacesBlock && lastIndent1Key) {
+          const cleanProp = line.startsWith('=') ? line.substring(1) : line
+          const sepIndex = cleanProp.indexOf(':')
+          if (sepIndex === -1) continue
+          const pKey = cleanProp.substring(0, sepIndex).trim()
+          const pValue = cleanProp.substring(sepIndex + 1).trim()
+          // Skip GUID/Value/AssetMesh — these are mesh-registry entries, not component props
+          if (pKey === 'GUID' || pKey === 'Value' || pKey === 'AssetMesh') continue
+
+          // Promote the parent property to an object so it can hold sub-properties
+          const parent = currentComponent.properties[lastIndent1Key]
+          if (typeof parent !== 'object' || parent === null || Array.isArray(parent)) {
+            // Preserve the original scalar value under _value
+            currentComponent.properties[lastIndent1Key] = { _value: parent }
+          }
+
+          if (pValue.startsWith('(') && pValue.endsWith(')')) {
+            currentComponent.properties[lastIndent1Key][pKey] = pValue
+              .replace(/[()]/g, '')
+              .split(',')
+              .map(n => parseFloat(n.trim()) || 0)
+          } else {
+            currentComponent.properties[lastIndent1Key][pKey] = isNaN(Number(pValue))
               ? pValue
               : parseFloat(pValue)
           }
+          continue
         }
       }
 
@@ -451,6 +522,7 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
         price: metaItem.price !== undefined ? metaItem.price : 5,
         tags: ['Imported'],
         thumbnailKey: matchedThumbnailKey,
+        variantGuids: metaItem.variantGuids?.length > 0 ? metaItem.variantGuids : undefined,
         // textureKeys kept as empty {} for backward compatibility with persisted projects.
         // Slot-bound textures are read from components[].properties (DetailMap, ColorZoneMap)
         // which is where the game actually looks — not from filename-derived PBR slot names.
@@ -486,7 +558,6 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }
-    console.log('[DEBUG] components:', JSON.stringify(synthesizedProject.items[0]?.components, null, 2))
 
     onImportComplete(synthesizedProject)
   }

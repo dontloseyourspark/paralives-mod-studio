@@ -112,8 +112,13 @@ export function bindTextureSlot(
 // ─── Node filtering ───────────────────────────────────────────────────────────
 
 // Returns only the ItemMeshReference nodes from a component array,
-// in document order (root first, then children by ChildIndex).
-// These are the only nodes that carry texture slot bindings.
+// sorted: root node first (childIndex undefined), then children in ChildIndex order.
 export function getMeshNodes(components: ComponentNode[]): ComponentNode[] {
-  return components.filter(c => c.type === 'ItemMeshReference')
+  return components
+    .filter(c => c.type === 'ItemMeshReference')
+    .sort((a, b) => {
+      const ai = a.childIndex ?? -1
+      const bi = b.childIndex ?? -1
+      return ai - bi
+    })
 }

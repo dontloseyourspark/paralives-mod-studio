@@ -6,14 +6,17 @@ import ItemsPanel from './ItemsPanel'
 import ItemEditorPanel from './ItemEditorPanel'
 import CreateModWizard, { type TranslationWizardPayload } from './CreateModWizard'
 import TranslationEditorPanel from './TranslationEditorPanel'
-import type { Item, ModProject } from '../types/types'
+import type { Item, ModProject, ComponentNode } from '../types/types'
 
 interface WorkspaceCanvasProps {
   project?: ModProject
   items: Item[]
   selectedItemId: string | null
+  selectedNodeKey: string | null
   activeSelectedItem: Item | null
+  activeSelectedNode: ComponentNode | null
   onSelectItem: (item: Item) => void
+  onSelectNode: (node: ComponentNode) => void
   onAddItem: () => void
   onDeleteItem: (itemId: string) => void
   onSaveItem: (updatedItem: Item) => void
@@ -25,8 +28,11 @@ export default function WorkspaceCanvas({
   project,
   items,
   selectedItemId,
+  selectedNodeKey,
   activeSelectedItem,
+  activeSelectedNode,
   onSelectItem,
+  onSelectNode,
   onDeleteItem,
   onSaveItem,
   onWizardAdvancedEditing,
@@ -36,12 +42,10 @@ export default function WorkspaceCanvas({
   const registerFileInCache = useModStore((s) => s.registerFileInCache)
   const stringUrlCache = useModStore((s) => s.stringUrlCache)
 
-  // Drive layout entirely from modType
   const modType = project?.modType ?? (items.length > 0 ? 'item' : 'translation')
   const showItemsPanel = modType === 'item' || modType === 'surface'
   const showTranslationEditor = modType === 'translation'
 
-  // Resolve cover URL the same way WorkspaceHeader does — RAM first, then localStorage
   const coverThumbnailUrl = project?.coverThumbnailKey
     ? stringUrlCache[project.coverThumbnailKey] ?? localStorage.getItem(`asset_fallback_${project.coverThumbnailKey}`)
     : null
@@ -56,13 +60,14 @@ export default function WorkspaceCanvas({
   return (
     <div className="flex-1 flex min-h-0 relative">
 
-      {/* Items sidebar — only shown for item and surface mods */}
       {showItemsPanel && (
         <div className="relative h-full flex flex-col shrink-0">
           <ItemsPanel
             items={items}
             selectedItemId={selectedItemId}
+            selectedNodeKey={selectedNodeKey}
             onSelectItem={onSelectItem}
+            onSelectNode={onSelectNode}
             coverThumbnailUrl={coverThumbnailUrl}
             onCoverUpload={handleCoverUpload}
           />
@@ -89,7 +94,6 @@ export default function WorkspaceCanvas({
         </div>
       )}
 
-      {/* Main panel — driven by modType */}
       <main className="flex-1 h-full min-w-0 bg-[#0e1017]">
         {showTranslationEditor ? (
           <TranslationEditorPanel />
@@ -97,6 +101,7 @@ export default function WorkspaceCanvas({
           <ItemEditorPanel
             key={activeSelectedItem?.id}
             item={activeSelectedItem}
+            activeNode={activeSelectedNode}
             onSave={onSaveItem}
           />
         )}

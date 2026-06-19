@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useModStore } from '../store/useModStore'
-import type { Item } from '../types/types'
+import type { Item, ComponentNode } from '../types/types'
 import type { TranslationWizardPayload } from '../components/CreateModWizard'
+import { getMeshNodes } from '../lib/itemTextureSlots'
 
 /**
  * All workspace logic for the project editor screen.
@@ -13,17 +14,14 @@ import type { TranslationWizardPayload } from '../components/CreateModWizard'
  *   Zustand persist middleware finishes loading (Phase 1 of App.tsx boot).
  *   No lookup through recentProjects is needed.
  *
- * This hook only needs to:
- *   1. Wait for the persist middleware to finish (storeReady gate)
- *   2. Verify the URL projectId matches the restored currentProject
- *   3. Redirect to '/' if there's genuinely nothing to show
+ * Node selection (selectedNodeId) is session-only — not persisted.
+ * It resets to the root ItemMeshReference node whenever the selected item changes.
  */
 export function useProjectWorkspace() {
   const navigate = useNavigate()
   const { id: projectId } = useParams<{ id: string }>()
 
   // ── Zustand persist hydration gate ────────────────────────────────────────
-  // Wait for localStorage restore to complete before acting on store state.
   const [storeReady, setStoreReady] = useState(false)
 
   useEffect(() => {
@@ -46,9 +44,9 @@ export function useProjectWorkspace() {
   }, [storeReady])
 
   // ── Store reads ────────────────────────────────────────────────────────────
-  const currentProject  = useModStore((s) => s.currentProject)
-  const recentProjects  = useModStore((s) => s.recentProjects)
-  const selectedItemId  = useModStore((s) => s.selectedItemId)
+  const currentProject = useModStore((s) => s.currentProject)
+  const recentProjects = useModStore((s) => s.recentProjects)
+  const selectedItemId = useModStore((s) => s.selectedItemId)
 
   // ── Store mutations ────────────────────────────────────────────────────────
   const setProject            = useModStore((s) => s.setProject)
@@ -61,14 +59,10 @@ export function useProjectWorkspace() {
   const deleteItem            = useModStore((s) => s.deleteItem)
 
   // ── Project validation after store is ready ────────────────────────────────
-  // currentProject is persisted directly, so it's restored automatically.
-  // We just need to handle the edge case where the URL id doesn't match
-  // (e.g. user manually edited the URL, or navigated to a stale link).
   useEffect(() => {
     if (!storeReady) return
 
     if (!currentProject) {
-      // Nothing persisted — try to recover from recentProjects by URL id
       if (projectId && recentProjects.length > 0) {
         const match = recentProjects.find((p) => p.id === projectId)
         if (match) {
@@ -77,13 +71,11 @@ export function useProjectWorkspace() {
           return
         }
       }
-      // Genuinely nothing found — redirect home
       console.warn('[useProjectWorkspace] No project to restore, redirecting home.')
       navigate('/')
       return
     }
 
-    // Project is loaded — verify the URL id matches (catches stale URL edge case)
     if (projectId && currentProject.id !== projectId) {
       const match = recentProjects.find((p) => p.id === projectId)
       if (match) {
@@ -99,15 +91,40 @@ export function useProjectWorkspace() {
   // ── Loading state ──────────────────────────────────────────────────────────
   const isRehydrating = !storeReady
 
-  // ── Derived state ──────────────────────────────────────────────────────────
+  // ── Derived item state ─────────────────────────────────────────────────────
   const activeSelectedItem =
     currentProject?.items.find((i) => i.id === selectedItemId) ?? null
+
+  // ── Node selection (session-only, not persisted) ───────────────────────────
+  // Tracks which ComponentNode (by composite key id+type) is active in the
+  // left panel accordion. Resets to the root mesh node whenever the item changes.
+  const [selectedNodeKey, setSelectedNodeKey] = useState<string | null>(null)
+
+  // Derive the root node key for a given item
+  const getRootNodeKey = useCallback((item: Item | null): string | null => {
+    if (!item) return null
+    const meshNodes = getMeshNodes(item.components || [])
+    const root = meshNodes.find(n => n.childIndex === undefined) ?? meshNodes[0]
+    return root ? `${root.id}_${root.type}` : null
+  }, [])
+
+  // Auto-select root node when selected item changes
+  useEffect(() => {
+    setSelectedNodeKey(getRootNodeKey(activeSelectedItem))
+  }, [selectedItemId, activeSelectedItem, getRootNodeKey])
+
+  // Derive the active node from the key
+  const activeSelectedNode: ComponentNode | null = (() => {
+    if (!selectedNodeKey || !activeSelectedItem) return null
+    return activeSelectedItem.components.find(
+      c => `${c.id}_${c.type}` === selectedNodeKey
+    ) ?? null
+  })()
 
   // ── Action handlers ────────────────────────────────────────────────────────
   const [isSaving, setIsSaving] = useState(false)
 
   const handleBackToDashboard = () => {
-    // Clear the active session pointers — persisted recentProjects stays intact
     clearWorkspaceSession()
     navigate('/')
   }
@@ -134,14 +151,17 @@ export function useProjectWorkspace() {
     addItemWith(newItem)
   }
 
-  const handleDeleteItem  = (itemId: string) => deleteItem(itemId)
-  const handleSelectItem  = (item: Item) => setSelectedItemId(item.id)
+  const handleDeleteItem = (itemId: string) => deleteItem(itemId)
 
-  /**
-   * Called when the user finishes the wizard via "Advanced editing".
-   * Adds the partially-built item to the project and selects it so the
-   * full editor opens immediately.
-   */
+  const handleSelectItem = (item: Item) => {
+    setSelectedItemId(item.id)
+    // Node auto-selection happens via the useEffect above
+  }
+
+  const handleSelectNode = useCallback((node: ComponentNode) => {
+    setSelectedNodeKey(`${node.id}_${node.type}`)
+  }, [])
+
   const handleWizardAdvancedEditing = (partial: Partial<Item> | TranslationWizardPayload) => {
     if ('isTranslation' in partial) return
     const newItem: Item = {
@@ -162,13 +182,16 @@ export function useProjectWorkspace() {
   return {
     currentProject,
     selectedItemId,
+    selectedNodeKey,
     activeSelectedItem,
+    activeSelectedNode,
     isSaving,
     isRehydrating,
     updateProject,
     handleAddNewItem,
     handleDeleteItem,
     handleSelectItem,
+    handleSelectNode,
     handleWizardAdvancedEditing,
     updateItem,
     handleSaveProject,
