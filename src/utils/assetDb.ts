@@ -19,7 +19,7 @@ function openDb(): Promise<IDBDatabase> {
   })
 }
 
-// Intercepts the image, crops it perfectly to the center, scales it to 1024x1024, 
+// Intercepts the image, crops it perfectly to the center, scales it to 1024x1024,
 // and converts it to a tiny WebP string so it never blows up the LocalStorage quota.
 function compressImageToBase64(file: File | Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -30,7 +30,7 @@ function compressImageToBase64(file: File | Blob): Promise<string> {
       URL.revokeObjectURL(url)
       const canvas = document.createElement('canvas')
       const ctx = canvas.getContext('2d')
-      
+
       if (!ctx) {
         const reader = new FileReader()
         reader.onload = () => resolve(reader.result as string)
@@ -47,8 +47,8 @@ function compressImageToBase64(file: File | Blob): Promise<string> {
       const startY = (img.height - minDim) / 2
 
       ctx.drawImage(
-        img, 
-        startX, startY, minDim, minDim, 
+        img,
+        startX, startY, minDim, minDim,
         0, 0, TARGET_SIZE, TARGET_SIZE
       )
 
@@ -57,6 +57,19 @@ function compressImageToBase64(file: File | Blob): Promise<string> {
 
     img.onerror = () => reject(new Error('Failed to load image for compression.'))
     img.src = url
+  })
+}
+
+// Reads a file as a data URL without any re-encoding or resizing.
+// Used for item texture maps where exact byte preservation matters —
+// lossy WebP re-encode destroys channel data the game depends on
+// (normal vectors, ColorZone primaries, GrayMask 50%-gray pivot, etc.).
+function readFileAsDataUrl(file: File | Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(file)
   })
 }
 
@@ -73,6 +86,11 @@ function base64ToBlob(dataUrl: string): Blob {
 }
 
 export const assetDb = {
+
+  // ── saveFile ──────────────────────────────────────────────────────────────
+  // For display images only: thumbnails, covers, catalog images.
+  // Compresses to 1024×1024 WebP before storing — DO NOT use for texture maps.
+  // For texture maps use saveFileRaw below.
   async saveFile(key: string, file: File | Blob): Promise<void> {
     try {
       const base64String = await compressImageToBase64(file)
@@ -88,7 +106,7 @@ export const assetDb = {
           tx.objectStore(STORE_NAME).put(base64String, key)
         })
         console.log(`[assetDb] Successfully saved ${key} to IndexedDB.`)
-        return 
+        return
       } catch {
         console.warn(`[assetDb] IndexedDB threw an Internal Error. Executing fallback protocol...`)
       }
@@ -106,6 +124,51 @@ export const assetDb = {
     }
   },
 
+  // ── saveFileRaw ───────────────────────────────────────────────────────────
+  // For item texture maps: DetailMap, ColorZoneMap, DecalMap, DirtyOverlay.
+  // Stores the original bytes via FileReader — no canvas re-encode, no resize,
+  // no lossy compression. Uses the same IDB + localStorage fallback path as
+  // saveFile so getAllFiles() / hydrateCacheFromDisk() picks them up on boot.
+  //
+  // Key format: item_tex_{itemGuid}_{slotName}
+  // e.g. item_tex_2751226219996142798_DetailMap
+  //
+  // NOTE: localStorage fallback will QuotaExceededError for full-res textures
+  // (typically >5MB). IDB is the primary store. Users on a broken-IDB profile
+  // may need to re-upload textures after refresh — acceptable for v1.
+  async saveFileRaw(key: string, file: File | Blob): Promise<void> {
+    try {
+      const dataUrl = await readFileAsDataUrl(file)
+
+      // ATTEMPT 1: IndexedDB (same store as saveFile)
+      try {
+        const db = await openDb()
+        await new Promise<void>((resolve, reject) => {
+          const tx = db.transaction(STORE_NAME, 'readwrite')
+          tx.oncomplete = () => { db.close(); resolve() }
+          tx.onerror = () => { db.close(); reject(tx.error) }
+          tx.onabort = () => { db.close(); reject(tx.error) }
+          tx.objectStore(STORE_NAME).put(dataUrl, key)
+        })
+        console.log(`[assetDb] Successfully saved ${key} to IndexedDB (raw).`)
+        return
+      } catch {
+        console.warn(`[assetDb] IndexedDB write failed for ${key} (raw). Trying localStorage fallback...`)
+      }
+
+      // ATTEMPT 2: localStorage fallback — will likely fail for large textures
+      try {
+        localStorage.setItem(`asset_fallback_${key}`, dataUrl)
+        console.log(`[assetDb] Saved ${key} to localStorage fallback (raw).`)
+      } catch (lsError) {
+        console.warn(`[assetDb] localStorage fallback failed for ${key} (likely too large):`, lsError)
+      }
+
+    } catch (error) {
+      console.error(`[assetDb] Total save failure for ${key} (raw):`, error)
+    }
+  },
+
   async getFile(key: string): Promise<Blob | null> {
     const fallbackData = localStorage.getItem(`asset_fallback_${key}`)
     if (fallbackData) {
@@ -117,7 +180,7 @@ export const assetDb = {
       return await new Promise<Blob | null>((resolve, reject) => {
         const tx = db.transaction(STORE_NAME, 'readonly')
         const req = tx.objectStore(STORE_NAME).get(key)
-        
+
         req.onsuccess = () => {
           db.close()
           const val = req.result
@@ -178,7 +241,7 @@ export const assetDb = {
       if (lsKey && lsKey.startsWith('asset_fallback_')) {
         const originalKey = lsKey.replace('asset_fallback_', '')
         const data = localStorage.getItem(lsKey)
-        
+
         if (data && data.startsWith('data:')) {
           try {
             records[originalKey] = base64ToBlob(data)

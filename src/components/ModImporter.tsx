@@ -21,10 +21,8 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
     // manually uploaded covers are keyed
     const newProjectId = crypto.randomUUID()
 
-    // Purge all keys from previous import sessions before writing new ones.
-    // Keeps cover_ keys (they're per-project and should persist across sessions).
-    // Purges everything else: item_thumb_*, PROJECT_COVER_MASTER, texture keys.
     const existingKeys = await assetDb.listKeys()
+    console.log('[DEBUG] keys before purge:', existingKeys)
     await Promise.all(
       existingKeys
         .filter(k =>
@@ -34,6 +32,7 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
         )
         .map(k => assetDb.deleteFile(k))
     )
+    console.log('[DEBUG] purge complete')
 
     let itemsSettingContent = ''
     let translationsSettingContent = ''
@@ -42,18 +41,17 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
 
     const componentSettings: Record<string, string> = {}
     const prefabContents: Record<string, string> = {}
-    
+
     const prefabGuidToNameMap: Record<string, string> = {}
     const fileNameToTextMap: Record<string, string> = {}
-    
+
     // Thumbnails collected in order — matched positionally to items
     const thumbnailFiles: File[] = []
-    const textureKeys: Record<string, string> = {}
     let projectCoverKey: string | null = null
 
     // 1. Normalize file inputs (handles both zip archives and unzipped directories)
     const isArchive = fileList.length === 1 && (fileList[0].name.endsWith('.zip') || fileList[0].name.endsWith('.mod'))
-    
+
     if (isArchive) {
       detectedLanguageName = fileList[0].name.replace(/\.(zip|mod)$/i, '')
     }
@@ -64,7 +62,7 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
       const zip = await JSZip.loadAsync(fileList[0])
       for (const [relativePath, zipEntry] of Object.entries(zip.files)) {
         if (zipEntry.dir) continue
-        
+
         fileEntries.push({
           path: relativePath,
           name: zipEntry.name.split('/').pop() || '',
@@ -130,11 +128,11 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
         continue
       }
 
-      // Await registration so IndexedDB write completes before we navigate away
+      // Root-level PNGs: register in IDB for potential future use but do not
+      // map to PBR slot names — slot bindings come from the prefab, not filenames.
       if (path.split('/').length === 2 && path.endsWith('.png')) {
         const textureKey = fileName.replace('.png', '')
         await registerFileInCache(textureKey, await entry.getFile())
-        textureKeys[textureKey] = textureKey
         continue
       }
 
@@ -150,12 +148,12 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
       if (path.endsWith('Prefabs.Metacache')) {
         const cacheText = await entry.text()
         const blocks = cacheText.split('\n\n')
-        
+
         blocks.forEach(block => {
           const lines = block.split('\n')
           let currentPath = ''
           let currentGuid = ''
-          
+
           lines.forEach(l => {
             const trimL = l.trim()
             if (trimL.startsWith('Prefabs/')) {
@@ -165,7 +163,7 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
               currentGuid = trimL.split(':')[1].trim()
             }
           })
-          
+
           if (currentPath && currentGuid) {
             prefabGuidToNameMap[currentGuid] = currentPath
           }
@@ -179,6 +177,7 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
     }
 
     // 3. Parsers
+
     const parseParalivesSetting = (text: string) => {
       const lines = text.split('\n')
       const itemsList: any[] = []
@@ -186,7 +185,7 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
 
       lines.forEach((rawLine) => {
         const line = rawLine.trim()
-        
+
         if (line.startsWith('@')) {
           if (currentItem && currentItem.guid) itemsList.push(currentItem)
           currentItem = { tags: [] }
@@ -195,7 +194,7 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
         if (line.startsWith('=')) {
           const cleanProp = line.substring(1)
           const separatorIndex = cleanProp.indexOf(':')
-          
+
           if (separatorIndex !== -1) {
             const key = cleanProp.substring(0, separatorIndex).trim()
             const value = cleanProp.substring(separatorIndex + 1).trim()
@@ -217,40 +216,169 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
       return itemsList
     }
 
-    const parsePrefabGraph = (text: string) => {
+    // parsePrefabGraph — indentation-aware prefab parser.
+    //
+    // The Paralives prefab format uses indentation as structure (LF line endings, no CRLF):
+    //   indent 0 — component headings (ItemMeshReference:) and node separators (---)
+    //   indent 1 — flat properties on the current component, OR sub-block openers (Surfaces:)
+    //   indent 2 — entries inside a sub-block (Surface:)
+    //   indent 3 — properties inside a sub-block entry (GUID:, Value: inside Surface)
+    //
+    // ColorZoneMap and DetailMap are at indent 1 — flat properties on ItemMeshReference,
+    // appearing after the Surfaces block closes. They are what the texture editor reads/writes.
+    const parsePrefabGraph = (text: string): ComponentNode[] => {
       const lines = text.split('\n')
       const components: ComponentNode[] = []
+
+      let currentNodeGuid = ''
+      let currentNodeName = ''
       let currentComponent: ComponentNode | null = null
+      let inSurfacesBlock = false
+      let currentSurface: { guid: string; value: string } | null = null
 
-      lines.forEach((rawLine) => {
+      const flushComponent = () => {
+        if (!currentComponent) return
+        if (currentSurface) {
+          currentComponent.surfaces = currentComponent.surfaces ?? []
+          currentComponent.surfaces.push(currentSurface)
+          currentSurface = null
+        }
+        if (currentComponent.surfaces && currentComponent.surfaces.length === 0) {
+          delete currentComponent.surfaces
+        }
+        components.push(currentComponent)
+        currentComponent = null
+        inSurfacesBlock = false
+      }
+
+      for (const rawLine of lines) {
+        if (rawLine === '' || rawLine === '\r') continue
+
+        const indent = rawLine.length - rawLine.trimStart().length
         const line = rawLine.trim()
-        if (!line || line === '---') return
 
-        if (line.endsWith(':') && !line.startsWith('=') && !line.startsWith('@') && !line.includes('(')) {
-          if (currentComponent) components.push(currentComponent)
-          currentComponent = { id: crypto.randomUUID(), type: line.replace(':', ''), properties: {} }
-          return
+        // Node separator
+        if (line === '---') {
+          flushComponent()
+          currentNodeGuid = ''
+          currentNodeName = ''
+          inSurfacesBlock = false
+          currentSurface = null
+          continue
         }
 
-        if (currentComponent && line.includes(':')) {
-          const cleanProp = line.startsWith('=') ? line.substring(1) : line
-          const sepIndex = cleanProp.indexOf(':')
-          
-          if (sepIndex !== -1) {
-            const pKey = cleanProp.substring(0, sepIndex).trim()
-            const pValue = cleanProp.substring(sepIndex + 1).trim()
-            
-            if (pValue.startsWith('(') && pValue.endsWith(')')) {
-              currentComponent.properties[pKey] = pValue.replace(/[()]/g, '').split(',').map(num => parseFloat(num.trim()) || 0)
-            } else {
-              currentComponent.properties[pKey] = isNaN(Number(pValue)) ? pValue : parseFloat(pValue)
+        // ItemObject:{guid} at indent 0 — capture stable node GUID
+        const itemObjMatch = line.match(/^ItemObject:(\d+)$/)
+        if (itemObjMatch && indent === 0) {
+          flushComponent()
+          currentNodeGuid = itemObjMatch[1]
+          currentNodeName = ''
+          inSurfacesBlock = false
+          currentSurface = null
+          continue
+        }
+
+        // Name: at indent 1, before any component is open
+        if (!currentComponent && indent === 1 && line.startsWith('Name:')) {
+          currentNodeName = line.substring(5).trim()
+          continue
+        }
+
+        // Structural node metadata — skip
+        if (!currentComponent && (line.startsWith('ParentGUID:') || line.startsWith('ChildIndex:'))) {
+          continue
+        }
+
+        // Component heading: indent 0, ends with ':', no spaces in the name
+        // e.g. "ItemMeshReference:", "ItemObjectRoot:", "ItemCubeTransform:"
+        if (
+          indent === 0 &&
+          line.endsWith(':') &&
+          !line.startsWith('=') &&
+          !line.startsWith('@') &&
+          !line.includes('(') &&
+          !line.includes(' ')
+        ) {
+          flushComponent()
+          currentComponent = {
+            id: currentNodeGuid || crypto.randomUUID(),
+            type: line.replace(':', ''),
+            nodeName: currentNodeName || undefined,
+            properties: {},
+            surfaces: [],
+          }
+          inSurfacesBlock = false
+          currentSurface = null
+          continue
+        }
+
+        if (!currentComponent) continue
+
+        // ' Surfaces:' at indent 1 — enter surface block
+        if (indent === 1 && line === 'Surfaces:') {
+          inSurfacesBlock = true
+          continue
+        }
+
+        if (inSurfacesBlock) {
+          // '  Surface:' at indent 2 — new surface entry
+          if (indent === 2 && line === 'Surface:') {
+            if (currentSurface) {
+              currentComponent.surfaces = currentComponent.surfaces ?? []
+              currentComponent.surfaces.push(currentSurface)
             }
+            currentSurface = { guid: '', value: '' }
+            continue
+          }
+          // '   GUID:' / '   Value:' at indent 3 — properties inside Surface
+          if (indent === 3 && currentSurface && line.startsWith('GUID:')) {
+            currentSurface.guid = line.substring(5).trim()
+            continue
+          }
+          if (indent === 3 && currentSurface && line.startsWith('Value:')) {
+            currentSurface.value = line.substring(6).trim()
+            continue
+          }
+          // Back to indent 1 — surfaces block is done, fall through to flat property parsing
+          if (indent <= 1) {
+            if (currentSurface) {
+              currentComponent.surfaces = currentComponent.surfaces ?? []
+              currentComponent.surfaces.push(currentSurface)
+              currentSurface = null
+            }
+            inSurfacesBlock = false
+            // Fall through
           }
         }
-      })
 
-      if (currentComponent) components.push(currentComponent)
-      return components
+        // Flat properties at indent 1 — direct properties on the component
+        // e.g. ColorZoneMap:, DetailMap:, MeshIndex:, LocalScale:
+        if (indent === 1 && line.includes(':') && !inSurfacesBlock) {
+          const cleanProp = line.startsWith('=') ? line.substring(1) : line
+          const sepIndex = cleanProp.indexOf(':')
+          if (sepIndex === -1) continue
+          const pKey = cleanProp.substring(0, sepIndex).trim()
+          const pValue = cleanProp.substring(sepIndex + 1).trim()
+          if (pKey === 'GUID' || pKey === 'Value') continue
+          if (pValue.startsWith('(') && pValue.endsWith(')')) {
+            currentComponent.properties[pKey] = pValue
+              .replace(/[()]/g, '')
+              .split(',')
+              .map(n => parseFloat(n.trim()) || 0)
+          } else {
+            currentComponent.properties[pKey] = isNaN(Number(pValue))
+              ? pValue
+              : parseFloat(pValue)
+          }
+        }
+      }
+
+      flushComponent()
+
+      return components.map(c => ({
+        ...c,
+        surfaces: c.surfaces && c.surfaces.length > 0 ? c.surfaces : undefined,
+      }))
     }
 
     const extractAnchors = (text: string): string[] => {
@@ -315,14 +443,6 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
 
       const matchedThumbnailKey = itemThumbnailKeys[metaItem.guid] ?? null
 
-      const itemTextures: Record<string, string> = {}
-      Object.keys(textureKeys).forEach(texName => {
-        const type = texName.endsWith('BaseColor') ? 'baseColor' :
-                     texName.endsWith('Normal') ? 'normal' :
-                     texName.endsWith('Roughness') ? 'roughness' : 'secondary'
-        itemTextures[type] = texName
-      })
-
       return {
         id: crypto.randomUUID(),
         guid: metaItem.guid || crypto.randomUUID(),
@@ -331,7 +451,10 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
         price: metaItem.price !== undefined ? metaItem.price : 5,
         tags: ['Imported'],
         thumbnailKey: matchedThumbnailKey,
-        textureKeys: itemTextures,
+        // textureKeys kept as empty {} for backward compatibility with persisted projects.
+        // Slot-bound textures are read from components[].properties (DetailMap, ColorZoneMap)
+        // which is where the game actually looks — not from filename-derived PBR slot names.
+        textureKeys: {},
         componentBlueprints: { rootDefaultStates: rootStates, materialSurfaces: meshSurfaces },
         components: extractedComponents
       }
@@ -349,7 +472,7 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
     const detectedModType: ModType = itemsMeta.length > 0 ? 'item' : 'translation'
 
     const synthesizedProject: ModProject = {
-      id: newProjectId,  // use the hoisted ID so cover_${newProjectId} matches
+      id: newProjectId,
       modType: detectedModType,
       modGuid: resolvedModGuid,
       name: parsedItems[0]?.name || detectedLanguageName || 'Imported Mod',
@@ -363,6 +486,7 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }
+    console.log('[DEBUG] components:', JSON.stringify(synthesizedProject.items[0]?.components, null, 2))
 
     onImportComplete(synthesizedProject)
   }
@@ -379,8 +503,8 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
         if (e.dataTransfer.files) processFiles(e.dataTransfer.files)
       }}
       className={`border-2 border-dashed rounded-2xl p-12 flex flex-col items-center justify-center gap-4 transition-all duration-150 text-center select-none ${
-        isDragging 
-          ? 'border-[#8b5cf6] bg-[#8b5cf6]/5 text-white' 
+        isDragging
+          ? 'border-[#8b5cf6] bg-[#8b5cf6]/5 text-white'
           : 'border-white/10 bg-[#161923] text-gray-400 hover:border-white/20'
       }`}
     >
