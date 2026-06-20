@@ -240,9 +240,7 @@ export default function CreateModWizard({ isOpen, onClose, onComplete, onAdvance
         ? 'Custom wall paint or wallpaper pattern.'
         : 'Custom placeable furniture item.',
       price: 0,
-      tags: state.modType === 'wall_paint'
-        ? ['Decoration', 'Color', 'Texture']
-        : ['Object', 'Placeable', 'Build Mode'],
+      tags: [], 
       thumbnailKey: null,
       textureKeys,
       componentBlueprints: { rootDefaultStates: [], materialSurfaces: [] },

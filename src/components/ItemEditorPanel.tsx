@@ -1,13 +1,13 @@
 // src/components/ItemEditorPanel.tsx
 import React, { useState, useRef } from 'react'
 import {
-  PencilSimple, CurrencyDollar, TextAlignLeft, Image, Cube,
+  PencilSimple, Image, Cube,
   Palette, UploadSimple, X, CheckCircle, Warning, TreeStructure, Copy
 } from 'phosphor-react'
 import { useModStore } from '../store/useModStore'
 import { ITEM_MESH_TEXTURE_SLOTS, SLOT_LABELS, CONFIRMED_SLOTS, itemTextureCacheKey } from '../lib/itemTextureSlots'
 import type { ItemMeshTextureSlot } from '../lib/itemTextureSlots'
-import type { Item, ComponentNode, PrefabPropertyValue } from '../types/types'
+import type { Item, ComponentNode } from '../types/types'
 
 interface ItemEditorPanelProps {
   item: Item | null
@@ -33,7 +33,7 @@ function isGuidLike(val: unknown): boolean {
   return false
 }
 
-function isBoolString(val: unknown): val is 'True' | 'False' {
+function isBoolString(val: unknown): val is string {
   return val === 'True' || val === 'False'
 }
 
@@ -137,8 +137,7 @@ function NodeTexturePanel({ item, node, onSave }: NodeTexturePanelProps) {
   const handleClear = (slot: ItemMeshTextureSlot) => {
     const updatedComponents = item.components.map((c) => {
       if (c.id === node.id && c.type === node.type) {
-        const rest = { ...c.properties }
-        delete rest[slot]
+        const { [slot]: _r, ...rest } = c.properties
         return { ...c, properties: rest }
       }
       return c
@@ -187,8 +186,8 @@ interface BlueprintPanelProps {
 // A single editable property row
 interface PropRowProps {
   propKey: string
-  value: PrefabPropertyValue
-  onChange: (key: string, newVal: PrefabPropertyValue) => void
+  value: unknown
+  onChange: (key: string, newVal: unknown) => void
 }
 
 function PropRow({ propKey, value, onChange }: PropRowProps) {
@@ -332,7 +331,7 @@ interface ComponentSectionProps {
 function ComponentSection({ item, node, defaultOpen = true, onSave }: ComponentSectionProps) {
   const [open, setOpen] = useState(defaultOpen)
 
-  const handleChange = (key: string, newVal: PrefabPropertyValue) => {
+  const handleChange = (key: string, newVal: unknown) => {
     const updatedComponents = item.components.map((c) =>
       c.id === node.id && c.type === node.type
         ? { ...c, properties: { ...c.properties, [key]: newVal } }
@@ -341,7 +340,7 @@ function ComponentSection({ item, node, defaultOpen = true, onSave }: ComponentS
     onSave({ ...item, components: updatedComponents })
   }
 
-  const handleSubChange = (parentKey: string, subKey: string, newVal: PrefabPropertyValue) => {
+  const handleSubChange = (parentKey: string, subKey: string, newVal: unknown) => {
     const updatedComponents = item.components.map((c) => {
       if (c.id === node.id && c.type === node.type) {
         const parent = c.properties[parentKey]
@@ -381,7 +380,7 @@ function ComponentSection({ item, node, defaultOpen = true, onSave }: ComponentS
             propEntries.map(([key, val]) => {
               // Nested sub-property object: { _value?: ..., SubKey: ... }
               if (typeof val === 'object' && val !== null && !Array.isArray(val)) {
-                const { _value, ...subProps } = val as Record<string, PrefabPropertyValue | undefined>
+                const { _value, ...subProps } = val as Record<string, unknown>
                 return (
                   <div key={key} className="mb-1">
                     <div className="flex items-center justify-between gap-3 py-1.5 border-b border-white/3">
@@ -390,7 +389,7 @@ function ComponentSection({ item, node, defaultOpen = true, onSave }: ComponentS
                         isBoolString(_value) ? (
                           <button
                             onClick={() => handleChange(key, {
-                              ...(val as Record<string, PrefabPropertyValue | undefined>),
+                              ...(val as Record<string, unknown>),
                               _value: _value === 'True' ? 'False' : 'True'
                             })}
                             className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${
@@ -411,7 +410,7 @@ function ComponentSection({ item, node, defaultOpen = true, onSave }: ComponentS
                         <PropRow
                           key={subKey}
                           propKey={subKey}
-                          value={subVal ?? null}
+                          value={subVal}
                           onChange={(k, v) => handleSubChange(key, k, v)}
                         />
                       ))}
@@ -451,12 +450,12 @@ function ComponentSection({ item, node, defaultOpen = true, onSave }: ComponentS
 function BlueprintPanel({ item, nodes, onSave }: BlueprintPanelProps) {
   return (
     <div className="flex flex-col gap-0">
-      {nodes.map((node, i) => (
+      {nodes.map((node) => (
         <ComponentSection
           key={`${node.id}_${node.type}`}
           item={item}
           node={node}
-          defaultOpen={i === 0}
+          defaultOpen={true}
           onSave={onSave}
         />
       ))}
@@ -473,7 +472,7 @@ interface NodeSectionProps {
 }
 
 function NodeSection({ item, node, onSave }: NodeSectionProps) {
-  const [tab, setTab] = useState<NodeTab>('textures')
+  const [tab, setTab] = useState<NodeTab>('prefab')
   const isRoot = node.childIndex === undefined
   const label = isRoot ? 'Root' : `Child ${node.childIndex}`
 
@@ -491,34 +490,34 @@ function NodeSection({ item, node, onSave }: NodeSectionProps) {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Node identity + tab strip */}
-      <div className="flex items-center gap-3 mb-3 pb-3 border-b border-white/5">
-        <div className={`w-2 h-2 rounded-full shrink-0 ${isRoot ? 'bg-blue-400' : 'bg-orange-400'}`} />
-        <span className="text-xs font-bold text-white">{label}</span>
-        <span className="text-[10px] text-gray-600 font-mono">{node.type}</span>
-        <div className="ml-auto flex gap-1">
-          <button
-            onClick={() => setTab('textures')}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all ${
-              tab === 'textures'
-                ? 'bg-[#8b5cf6]/15 text-[#a78bfa]'
-                : 'text-gray-500 hover:text-gray-300 hover:bg-white/3'
-            }`}
-          >
-            <Palette size={11} />
-            Textures
-          </button>
-          <button
-            onClick={() => setTab('prefab')}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all ${
-              tab === 'prefab'
-                ? 'bg-[#8b5cf6]/15 text-[#a78bfa]'
-                : 'text-gray-500 hover:text-gray-300 hover:bg-white/3'
-            }`}
-          >
-            <TreeStructure size={11} />
-            Prefab
-          </button>
+      {/* Tabs on left, node identity on right */}
+      <div className="flex items-center gap-1 mb-3 pb-3 border-b border-white/5">
+        <button
+          onClick={() => setTab('prefab')}
+          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all ${
+            tab === 'prefab'
+              ? 'bg-[#8b5cf6]/15 text-[#a78bfa]'
+              : 'text-gray-500 hover:text-gray-300 hover:bg-white/3'
+          }`}
+        >
+          <TreeStructure size={11} />
+          Prefab
+        </button>
+        <button
+          onClick={() => setTab('textures')}
+          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all ${
+            tab === 'textures'
+              ? 'bg-[#8b5cf6]/15 text-[#a78bfa]'
+              : 'text-gray-500 hover:text-gray-300 hover:bg-white/3'
+          }`}
+        >
+          <Palette size={11} />
+          Textures
+        </button>
+        <div className="ml-auto flex items-center gap-2">
+          <div className={`w-2 h-2 rounded-full shrink-0 ${isRoot ? 'bg-blue-400' : 'bg-orange-400'}`} />
+          <span className="text-xs font-bold text-white">{label}</span>
+          <span className="text-[10px] text-gray-600 font-mono">{node.type}</span>
         </div>
       </div>
 
@@ -535,11 +534,6 @@ function NodeSection({ item, node, onSave }: NodeSectionProps) {
 
 export default function ItemEditorPanel({ item, activeNode, onSave }: ItemEditorPanelProps) {
   const getBlobUrlFromCache = useModStore((state) => state.getBlobUrlFromCache)
-  // WorkspaceCanvas mounts this with key={activeSelectedItem?.id}, so a fresh
-  // instance (and fresh initial state below) is guaranteed whenever item changes.
-  const [name, setName] = useState(item?.name || '')
-  const [price, setPrice] = useState<number>(item?.price ?? 0)
-  const [description, setDescription] = useState(item?.description || '')
 
   if (!item) {
     return (
@@ -551,10 +545,11 @@ export default function ItemEditorPanel({ item, activeNode, onSave }: ItemEditor
   }
 
   const liveThumbnailUrl = getBlobUrlFromCache(item.thumbnailKey ?? null)
+  const [name, setName] = useState(item.name || '')
+  const [price, setPrice] = useState<number>(item.price ?? 0)
+  const [description, setDescription] = useState(item.description || '')
 
-  const handleFieldBlur = () => {
-    onSave({ ...item, name: name.trim(), price: Number(price) || 0, description: description.trim() })
-  }
+  const save = (patch: Partial<Item>) => onSave({ ...item, ...patch })
 
   const handleThumbnailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files?.[0]) {
@@ -562,81 +557,268 @@ export default function ItemEditorPanel({ item, activeNode, onSave }: ItemEditor
       const registerFileInCache = useModStore.getState().registerFileInCache
       const cacheKey = item.guid
       registerFileInCache(cacheKey, file)
-      onSave({ ...item, thumbnailKey: cacheKey })
+      save({ thumbnailKey: cacheKey })
     }
   }
 
+  const inputClass = "w-full bg-white/3 border border-white/5 rounded-xl px-4 py-2.5 text-sm font-medium text-white outline-none focus:border-[#8b5cf6]/40 focus:bg-[#8b5cf6]/2 transition-all duration-150"
+  const smallInputClass = "bg-white/3 border border-white/5 rounded-lg px-3 py-1.5 text-xs font-medium text-white outline-none focus:border-[#8b5cf6]/40 transition-all font-mono"
+  const labelClass = "text-[10px] font-bold uppercase tracking-wider text-gray-400"
+  const rowClass = "flex items-center justify-between gap-3 py-2 border-b border-white/3 last:border-0"
+  const groupLabelClass = "text-[10px] font-semibold uppercase tracking-widest text-gray-600 mt-4 mb-1.5 first:mt-0"
+
+  const Toggle = ({ value, onChange }: { value: boolean, onChange: (v: boolean) => void }) => (
+    <button onClick={() => onChange(!value)}
+      className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${value ? 'bg-[#8b5cf6]' : 'bg-white/10'}`}>
+      <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${value ? 'left-[18px]' : 'left-0.5'}`} />
+    </button>
+  )
+
+  // ── Level 0: single scrollable item view ────────────────────────────────────
+  if (!activeNode) {
+    return (
+      <div className="h-full flex flex-col bg-transparent text-white select-none box-border">
+        <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-4 min-h-0">
+
+          {/* ── Identity ── */}
+          <div className="flex flex-col md:flex-row gap-5 bg-[#161923] border border-white/5 rounded-2xl p-5 shrink-0">
+            <div className="flex flex-col gap-2 shrink-0 items-center">
+              <span className={labelClass}>Catalog Image</span>
+              <div className="relative w-28 h-28 bg-[#0e1017] border border-white/5 rounded-xl overflow-hidden group flex items-center justify-center shadow-inner">
+                {liveThumbnailUrl
+                  ? <img src={liveThumbnailUrl} alt={name} className="w-full h-full object-contain p-2" />
+                  : <Image size={28} weight="thin" className="text-gray-600" />
+                }
+                <label className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1.5 cursor-pointer text-center p-2">
+                  <PencilSimple size={14} className="text-[#8b5cf6]" />
+                  <span className="text-[10px] font-semibold text-gray-200">Replace</span>
+                  <input type="file" accept="image/png, image/jpeg" className="hidden" onChange={handleThumbnailChange} />
+                </label>
+              </div>
+            </div>
+            <div className="flex-1 flex flex-col gap-3 justify-center">
+              <div className="flex flex-col gap-1.5">
+                <label className={labelClass}>Display Name</label>
+                <input type="text" className={inputClass} value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  onBlur={() => save({ name: name.trim() })}
+                  placeholder="Item display name..." />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex flex-col gap-1.5">
+                  <label className={labelClass}>Price ($)</label>
+                  <input type="number" className={inputClass + " [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"}
+                    value={price === 0 ? '' : price}
+                    onChange={(e) => setPrice(parseFloat(e.target.value) || 0)}
+                    onBlur={() => save({ price: Number(price) || 0 })}
+                    placeholder="0" min="0" />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <label className={labelClass}>Price Multiplier</label>
+                  <input type="number" className={inputClass + " [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"}
+                    value={item.priceMultiplier ?? 1}
+                    onChange={(e) => save({ priceMultiplier: parseFloat(e.target.value) || 1 })}
+                    step="0.1" min="0" />
+                </div>
+              </div>
+              <div className={rowClass}>
+                <span className="text-xs text-gray-400">Hide From Catalog</span>
+                <Toggle value={item.hideFromCatalog ?? false} onChange={(v) => save({ hideFromCatalog: v })} />
+              </div>
+              <div className={rowClass}>
+                <span className="text-xs text-gray-400">Override Interaction Group</span>
+                <Toggle value={item.overrideInteractionGroup ?? false} onChange={(v) => save({ overrideInteractionGroup: v })} />
+              </div>
+              <div className={rowClass}>
+                <span className="text-xs text-gray-400">Override Impostor Interactions</span>
+                <Toggle value={item.overrideImpostorInteractions ?? false} onChange={(v) => save({ overrideImpostorInteractions: v })} />
+              </div>
+            </div>
+          </div>
+
+          {/* ── Description ── */}
+          <div className="flex flex-col gap-2 bg-[#161923] border border-white/5 rounded-2xl p-5 shrink-0">
+            <label className={labelClass}>Catalog Description</label>
+            <textarea className="w-full bg-white/3 border border-white/5 rounded-xl px-4 py-3 text-sm text-gray-300 placeholder-gray-600 outline-none focus:border-[#8b5cf6]/40 transition-all min-h-[70px] resize-vertical leading-relaxed"
+              value={description} onChange={(e) => setDescription(e.target.value)}
+              onBlur={() => save({ description: description.trim() })}
+              placeholder="Add a description..." />
+          </div>
+
+          {/* ── Swatch ── */}
+          <div className="bg-[#161923] border border-white/5 rounded-2xl p-5 shrink-0">
+            <p className={groupLabelClass}>Swatch</p>
+            <div className={rowClass}>
+              <span className="text-xs text-gray-400">Has Swatches</span>
+              <Toggle value={item.hasSwatches ?? false} onChange={(v) => save({ hasSwatches: v })} />
+            </div>
+            <div className={rowClass}>
+              <span className="text-xs text-gray-400">Swatch Group GUID</span>
+              <input className={smallInputClass + " w-48"} value={item.swatchGroup ?? ''}
+                onChange={(e) => save({ swatchGroup: e.target.value })} placeholder="GUID..." />
+            </div>
+            <div className={rowClass}>
+              <span className="text-xs text-gray-400">Default Swatch</span>
+              <input className={smallInputClass + " w-32"} value={item.defaultSwatch ?? '0'}
+                onChange={(e) => save({ defaultSwatch: e.target.value })} />
+            </div>
+            <div className={rowClass}>
+              <span className="text-xs text-gray-400">Color Zone Count</span>
+              <select className={smallInputClass} value={item.swatchColorZoneCount ?? 0}
+                onChange={(e) => save({ swatchColorZoneCount: parseInt(e.target.value) })}>
+                <option value={0}>One Color (0)</option>
+                <option value={1}>Two Zones (1)</option>
+                <option value={2}>Three Zones (2)</option>
+                <option value={3}>Four Zones (3)</option>
+              </select>
+            </div>
+            <div className={rowClass}>
+              <span className="text-xs text-gray-400">Thumbnail Type</span>
+              <select className={smallInputClass} value={item.swatchThumbnailType ?? 1}
+                onChange={(e) => save({ swatchThumbnailType: parseInt(e.target.value) })}>
+                <option value={1}>Item</option>
+                <option value={3}>Floor (top-down)</option>
+                <option value={4}>Wall (side-on)</option>
+              </select>
+            </div>
+          </div>
+
+          {/* ── Placement ── */}
+          <div className="bg-[#161923] border border-white/5 rounded-2xl p-5 shrink-0">
+            <p className={groupLabelClass}>Placement</p>
+            <div className={rowClass}>
+              <span className="text-xs text-gray-400">Price Skin Property</span>
+              <input className={smallInputClass + " w-32"} value={item.priceSkinProperty ?? 'None'}
+                onChange={(e) => save({ priceSkinProperty: e.target.value })} />
+            </div>
+            <div className={rowClass}>
+              <span className="text-xs text-gray-400">Multipurchase Override</span>
+              <input className={smallInputClass + " w-32"} value={item.multipurchaseOverride ?? 'NoOverride'}
+                onChange={(e) => save({ multipurchaseOverride: e.target.value })} />
+            </div>
+            <div className={rowClass}>
+              <span className="text-xs text-gray-400">Auto Select</span>
+              <Toggle value={item.autoSelect ?? false} onChange={(v) => save({ autoSelect: v })} />
+            </div>
+            <div className={rowClass}>
+              <span className="text-xs text-gray-400">Item Placement Tween Override</span>
+              <input className={smallInputClass + " w-32"} value={item.itemPlacementTweenOverride ?? 'None'}
+                onChange={(e) => save({ itemPlacementTweenOverride: e.target.value })} />
+            </div>
+            <p className={groupLabelClass}>Snapping</p>
+            <div className={rowClass}>
+              <span className="text-xs text-gray-400">Override Snap</span>
+              <Toggle value={item.overrideSnap ?? false} onChange={(v) => save({ overrideSnap: v })} />
+            </div>
+            <div className={rowClass}>
+              <span className="text-xs text-gray-400">Rotate To Snap Override</span>
+              <input className={smallInputClass + " w-32"} value={item.rotateToSnapOverride ?? 'NoOverride'}
+                onChange={(e) => save({ rotateToSnapOverride: e.target.value })} />
+            </div>
+          </div>
+
+          {/* ── Rendering ── */}
+          <div className="bg-[#161923] border border-white/5 rounded-2xl p-5 shrink-0">
+            <p className={groupLabelClass}>Rendering</p>
+            {([
+              ['Always Visible On Walls', 'alwaysVisibleOnWalls'],
+              ['Render As Wall', 'renderAsWall'],
+              ['Override Item Fading From Camera', 'overrideItemFadingFromCamera'],
+              ['Cannot Batch', 'cannotBatch'],
+            ] as [string, keyof Item][]).map(([label, field]) => (
+              <div key={field} className={rowClass}>
+                <span className="text-xs text-gray-400">{label}</span>
+                <Toggle value={!!(item[field])} onChange={(v) => save({ [field]: v })} />
+              </div>
+            ))}
+          </div>
+
+          {/* ── Behaviour ── */}
+          <div className="bg-[#161923] border border-white/5 rounded-2xl p-5 shrink-0">
+            <p className={groupLabelClass}>Animation</p>
+            <div className={rowClass}>
+              <span className="text-xs text-gray-400">Override Item For Animation</span>
+              <input className={smallInputClass + " w-32"} value={item.overrideItemForAnimation ?? 'None'}
+                onChange={(e) => save({ overrideItemForAnimation: e.target.value })} />
+            </div>
+            <p className={groupLabelClass}>Bills</p>
+            <div className={rowClass}>
+              <span className="text-xs text-gray-400">Ignore Usage Level From Tags</span>
+              <Toggle value={item.ignoreUsageLevelFromTags ?? false} onChange={(v) => save({ ignoreUsageLevelFromTags: v })} />
+            </div>
+            <p className={groupLabelClass}>Dirtyness</p>
+            <div className={rowClass}>
+              <span className="text-xs text-gray-400">Dirtiness Speed Tier</span>
+              <input className={smallInputClass + " w-32"} value={item.dirtinessSpeedTier ?? 'None'}
+                onChange={(e) => save({ dirtinessSpeedTier: e.target.value })} />
+            </div>
+            <p className={groupLabelClass}>Brokenness</p>
+            <div className={rowClass}>
+              <span className="text-xs text-gray-400">Breaking Speed Tier</span>
+              <input className={smallInputClass + " w-32"} value={item.breakingSpeedTier ?? 'None'}
+                onChange={(e) => save({ breakingSpeedTier: e.target.value })} />
+            </div>
+          </div>
+
+          {/* ── Variants ── */}
+          <div className="bg-[#161923] border border-white/5 rounded-2xl p-5 shrink-0">
+            <p className={groupLabelClass}>Variants in UI</p>
+            {item.itemVariants && item.itemVariants.length > 0 ? (
+              <div className="mb-3 flex flex-col gap-1.5">
+                {item.itemVariants.map((v, i) => (
+                  <div key={v.guid || i} className="flex items-center gap-2 px-3 py-2 bg-white/2 border border-white/5 rounded-lg">
+                    <span className="text-[10px] text-gray-500 font-mono shrink-0">Variant {i}</span>
+                    <span className="text-[10px] font-mono text-gray-400 truncate flex-1">{v.itemVariantGuid}</span>
+                    <button onClick={() => navigator.clipboard.writeText(v.itemVariantGuid)}
+                      className="text-gray-700 hover:text-gray-400 transition-colors shrink-0">
+                      <Copy size={10} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-gray-600 italic mb-3">No variants defined</p>
+            )}
+            {([
+              ['Synchronize Swatch Among Variants', 'synchronizeSwatchAmongVariants'],
+              ['Ignore Remember Index For Category', 'ignoreRememberIndexForCategory'],
+              ['Has Size Variants Overrides', 'hasSizeVariantsOverrides'],
+            ] as [string, keyof Item][]).map(([label, field]) => (
+              <div key={field} className={rowClass}>
+                <span className="text-xs text-gray-400">{label}</span>
+                <Toggle value={!!(item[field])} onChange={(v) => save({ [field]: v })} />
+              </div>
+            ))}
+          </div>
+
+          {/* ── Collectability / Patreon ── */}
+          <div className="bg-[#161923] border border-white/5 rounded-2xl p-5 shrink-0">
+            <p className={groupLabelClass}>Collectability</p>
+            <div className={rowClass}>
+              <span className="text-xs text-gray-400">Collectible Collection</span>
+              <input className={smallInputClass + " w-32"} value={item.collectibleCollection ?? 'None'}
+                onChange={(e) => save({ collectibleCollection: e.target.value })} />
+            </div>
+            <p className={groupLabelClass}>Patreon</p>
+            <div className={rowClass}>
+              <span className="text-xs text-gray-400">Patreon Name</span>
+              <input className={smallInputClass + " w-32"} value={item.patreonName ?? ''}
+                onChange={(e) => save({ patreonName: e.target.value })} placeholder="(none)" />
+            </div>
+          </div>
+
+        </div>
+      </div>
+    )
+  }
+
+  // ── Level 1+: node-level view (Prefab + Textures tabs) ──────────────────────
   return (
     <div className="h-full flex flex-col bg-transparent text-white select-none box-border">
-      <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-5 min-h-0">
-
-        {/* SECTION 1: Primary Metadata */}
-        <div className="flex flex-col md:flex-row gap-6 bg-[#161923] border border-white/5 rounded-2xl p-5 shadow-sm shrink-0">
-          <div className="flex flex-col gap-2 shrink-0 items-center">
-            <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 self-start">Item Catalog Image</label>
-            <div className="relative w-32 h-32 bg-[#0e1017] border border-white/5 rounded-xl overflow-hidden group flex items-center justify-center shadow-inner">
-              {liveThumbnailUrl
-                ? <img src={liveThumbnailUrl} alt={name} className="w-full h-full object-contain p-2" />
-                : <Image size={32} weight="thin" className="text-gray-600" />
-              }
-              <label className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-150 flex flex-col items-center justify-center gap-1.5 cursor-pointer text-center p-2">
-                <PencilSimple size={16} className="text-[#8b5cf6]" />
-                <span className="text-[10px] font-semibold text-gray-200">Replace Photo</span>
-                <input type="file" accept="image/png, image/jpeg" className="hidden" onChange={handleThumbnailChange} />
-              </label>
-            </div>
-          </div>
-
-          <div className="flex-1 flex flex-col gap-4 justify-center">
-            <div className="flex flex-col gap-1.5">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 flex items-center gap-1">
-                <PencilSimple size={10} /> Display Name
-              </label>
-              <input type="text"
-                className="w-full bg-white/3 border border-white/5 rounded-xl px-4 py-2.5 text-sm font-medium text-white outline-none focus:border-[#8b5cf6]/40 focus:bg-[#8b5cf6]/2 transition-all duration-150"
-                value={name} onChange={(e) => setName(e.target.value)} onBlur={handleFieldBlur}
-                placeholder="Enter workspace display title..."
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 flex items-center gap-1">
-                <CurrencyDollar size={10} /> Catalog Price ($)
-              </label>
-              <input type="number"
-                className="w-full bg-white/3 border border-white/5 rounded-xl px-4 py-2.5 text-sm font-medium text-white outline-none focus:border-[#8b5cf6]/40 focus:bg-[#8b5cf6]/2 transition-all duration-150 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                value={price === 0 ? '' : price} onChange={(e) => setPrice(parseFloat(e.target.value) || 0)}
-                onBlur={handleFieldBlur} placeholder="0" min="0"
-              />
-            </div>
-          </div>
+      <div className="flex-1 p-6 flex flex-col min-h-0">
+        <div className="bg-[#161923]/20 border border-white/5 rounded-xl p-4 flex-1 flex flex-col min-h-0">
+          <NodeSection item={item} node={activeNode} onSave={onSave} />
         </div>
-
-        {/* SECTION 2: Description */}
-        <div className="flex flex-col gap-2 bg-[#161923] border border-white/5 rounded-2xl p-5 shadow-sm shrink-0">
-          <label className="text-[10px] font-bold uppercase tracking-wider text-gray-400 flex items-center gap-1">
-            <TextAlignLeft size={10} /> Catalog Description
-          </label>
-          <textarea
-            className="w-full bg-white/3 border border-white/5 rounded-xl px-4 py-3 text-sm text-gray-300 placeholder-gray-600 outline-none focus:border-[#8b5cf6]/40 focus:bg-[#8b5cf6]/2 transition-all duration-150 min-h-[80px] resize-vertical leading-relaxed"
-            value={description} onChange={(e) => setDescription(e.target.value)}
-            onBlur={handleFieldBlur} placeholder="Add a description..."
-          />
-        </div>
-
-        {/* SECTION 3: Active node — textures + blueprint tabs */}
-        <div className="flex flex-col flex-1 min-h-0">
-          <div className="bg-[#161923]/20 border border-white/5 rounded-xl p-4 flex-1 flex flex-col min-h-0">
-            {activeNode ? (
-              <NodeSection item={item} node={activeNode} onSave={onSave} />
-            ) : (
-              <div className="flex-1 flex flex-col items-center justify-center gap-2 text-center">
-                <Palette size={24} weight="thin" className="text-gray-600" />
-                <span className="text-xs text-gray-600">Select a mesh node in the left panel</span>
-              </div>
-            )}
-          </div>
-        </div>
-
       </div>
     </div>
   )

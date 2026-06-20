@@ -4,7 +4,7 @@ import { Folder, UploadSimple } from 'phosphor-react'
 import JSZip from 'jszip'
 import { useModStore } from '../store/useModStore'
 import { assetDb } from '../utils/assetDb'
-import type { ModProject, TranslationData, ComponentNode, ModType, PrefabPropertyValue } from '../types/types'
+import type { ModProject, TranslationData, ComponentNode, ModType } from '../types/types'
 
 interface ModImporterProps {
   onImportComplete: (project: ModProject) => void
@@ -29,6 +29,7 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
       existingKeys
         .filter(k =>
           k.startsWith('item_thumb_') ||
+          k.startsWith('mesh_') ||
           k === 'PROJECT_COVER_MASTER' ||
           (!k.startsWith('cover_'))
         )
@@ -49,6 +50,11 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
     // Thumbnails collected in order — matched positionally to items
     const thumbnailFiles: File[] = []
     let projectCoverKey: string | null = null
+
+    // FBX assets: filename (without .fbx) → { file, assetGuid }
+    // Matched by pairing .fbx with its .fbx.meta sidecar
+    const fbxFiles: Record<string, File> = {}           // basename → File
+    const fbxMetaGuids: Record<string, string> = {}     // basename → GUID from meta
 
     // 1. Normalize file inputs (handles both zip archives and unzipped directories)
     const isArchive = fileList.length === 1 && (fileList[0].name.endsWith('.zip') || fileList[0].name.endsWith('.mod'))
@@ -137,6 +143,22 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
         continue
       }
 
+      // FBX mesh files — store raw bytes, matched to meta GUID below
+      if (path.split('/').length === 2 && path.endsWith('.fbx') && !path.endsWith('.fbx.meta')) {
+        const basename = fileName.replace('.fbx', '')
+        fbxFiles[basename] = await entry.getFile()
+        continue
+      }
+
+      // FBX meta sidecars — extract the asset GUID
+      if (path.split('/').length === 2 && path.endsWith('.fbx.meta')) {
+        const basename = fileName.replace('.fbx.meta', '')
+        const metaText = await entry.text()
+        const guidMatch = metaText.match(/^GUID:(.+)$/m)
+        if (guidMatch) fbxMetaGuids[basename] = guidMatch[1].trim()
+        continue
+      }
+
       // Key cover to project ID — same pattern as manually uploaded covers,
       // so getBlobUrlFromCache finds it and the dashboard displays it correctly
       if (path.split('/').length === 2 && path.endsWith('.mod.thumbnail')) {
@@ -177,63 +199,140 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
       return
     }
 
+    // Register matched FBX files in assetDb (raw bytes — binary mesh data)
+    // and build a guid→cacheKey map for all items to share
+    const meshKeysByGuid: Record<string, string> = {}
+    await Promise.all(
+      Object.entries(fbxFiles).map(async ([basename, file]) => {
+        const assetGuid = fbxMetaGuids[basename]
+        if (!assetGuid) return  // no matching meta — skip
+        const cacheKey = `mesh_${assetGuid}`
+        await assetDb.saveFileRaw(cacheKey, file)
+        meshKeysByGuid[assetGuid] = cacheKey
+      })
+    )
+
     // 3. Parsers
 
-    // Raw item record parsed from Items.setting, before synthesis into a full Item.
-    interface RawItemMeta {
-      guid?: string
-      modGuid?: string
-      displayNameGuid?: string
-      price?: number
-      targetPrefabGuid?: string
-      prefabFallbackName?: string
-      variantGuids: string[]
-      tags: string[]
-    }
-
-    const parseParalivesSetting = (text: string): RawItemMeta[] => {
+    // parseParalivesSetting — captures all Items.setting fields.
+    //
+    // Items.setting indent layout (using spaces):
+    //   2 spaces  @GUID  — top-level item entry
+    //   3 spaces  =Key:Value — item flat field
+    //   3 spaces  =ArrayKey  — array block opener (no value)
+    //   4 spaces  @GUID  — array entry
+    //   5 spaces  =Key:Value — array entry field
+    //
+    // We track: currentItem → currentArrayKey → currentArrayEntry
+    const parseParalivesSetting = (text: string) => {
       const lines = text.split('\n')
-      const itemsList: RawItemMeta[] = []
-      let currentItem: RawItemMeta | null = null
+      const itemsList: any[] = []
+      let currentItem: any = null
+      let currentArrayKey: string | null = null
+      let currentArrayEntry: any = null
 
-      // Plain for-loop (not .forEach) so TypeScript can track currentItem's
-      // narrowed type across iterations and after the loop ends.
+      const flushArrayEntry = () => {
+        if (!currentItem || !currentArrayKey || !currentArrayEntry) return
+        if (!currentItem._arrays) currentItem._arrays = {}
+        if (!currentItem._arrays[currentArrayKey]) currentItem._arrays[currentArrayKey] = []
+        currentItem._arrays[currentArrayKey].push(currentArrayEntry)
+        currentArrayEntry = null
+      }
+
       for (const rawLine of lines) {
+        const indent = rawLine.length - rawLine.trimStart().length
         const line = rawLine.trim()
+        if (!line || line.startsWith('#') || line === '=AllItems') continue
 
-        if (line.startsWith('@')) {
-          if (currentItem && currentItem.guid) itemsList.push(currentItem)
-          currentItem = { tags: [], variantGuids: [] }
+        // 2-space @GUID — new top-level item
+        if (indent === 2 && line.startsWith('@')) {
+          flushArrayEntry()
+          if (currentItem?.guid) itemsList.push(currentItem)
+          currentItem = { _arrays: {} }
+          currentArrayKey = null
+          currentArrayEntry = null
+          continue
         }
 
-        if (line.startsWith('=')) {
+        // 4-space @GUID — array entry inside current array block
+        if (indent === 4 && line.startsWith('@') && currentArrayKey) {
+          flushArrayEntry()
+          currentArrayEntry = { _entryGuid: line.substring(1).trim() }
+          continue
+        }
+
+        if (!currentItem) continue
+
+        // 3-space =Key or =Key:Value — item-level field
+        if (indent === 3 && line.startsWith('=')) {
           const cleanProp = line.substring(1)
-          const separatorIndex = cleanProp.indexOf(':')
+          const sep = cleanProp.indexOf(':')
 
-          if (separatorIndex !== -1) {
-            const key = cleanProp.substring(0, separatorIndex).trim()
-            const value = cleanProp.substring(separatorIndex + 1).trim()
-
-            if (currentItem) {
-              if (key === 'GUID') currentItem.guid = value
-              if (key === 'CustomModGUID') currentItem.modGuid = value
-              // Store as displayNameGuid — it's a translation key, not the name itself
-              if (key === 'DisplayName') currentItem.displayNameGuid = value
-              if (key === 'PriceOverride') currentItem.price = parseFloat(value) || 0
-              if (key === 'Prefab') currentItem.targetPrefabGuid = value
-              if (key === 'Value') currentItem.prefabFallbackName = value
-              // Collect variant GUIDs — these are the GUIDs of all items in this variant group,
-              // including the parent itself. Used to build the accordion grouping in ItemsPanel.
-              if (key === 'ItemVariantGUID') {
-                currentItem.variantGuids = currentItem.variantGuids || []
-                currentItem.variantGuids.push(value)
-              }
-            }
+          if (sep === -1) {
+            // Array block opener (e.g. =Tag, =ItemVariants, =ColorZoneNames)
+            flushArrayEntry()
+            currentArrayKey = cleanProp.trim()
+            currentArrayEntry = null
+            continue
           }
+
+          const key = cleanProp.substring(0, sep).trim()
+          const value = cleanProp.substring(sep + 1).trim()
+
+          // Reset array context — flat field ends any array block
+          currentArrayKey = null
+          currentArrayEntry = null
+
+          if (key === 'GUID') currentItem.guid = value
+          else if (key === 'CustomModGUID') currentItem.modGuid = value
+          else if (key === 'DisplayName') currentItem.displayNameGuid = value
+          else if (key === 'Prefab') currentItem.targetPrefabGuid = value
+          else if (key === 'HideFromCatalog') currentItem.hideFromCatalog = value === 'True'
+          else if (key === 'HasSwatches') currentItem.hasSwatches = value === 'True'
+          else if (key === 'SwatchGroup') currentItem.swatchGroup = value
+          else if (key === 'DefaultSwatch') currentItem.defaultSwatch = value
+          else if (key === 'SwatchColorZoneCount') currentItem.swatchColorZoneCount = parseInt(value) || 0
+          else if (key === 'SwatchThumbnailType') currentItem.swatchThumbnailType = parseInt(value) || 1
+          else if (key === 'PriceOverride') currentItem.price = parseFloat(value) || 0
+          else if (key === 'PriceMultiplier') currentItem.priceMultiplier = parseFloat(value) || 1
+          else if (key === 'PriceSkinProperty') currentItem.priceSkinProperty = value
+          else if (key === 'MultipurchaseOverride') currentItem.multipurchaseOverride = value
+          else if (key === 'AutoSelect') currentItem.autoSelect = value === 'True'
+          else if (key === 'ItemPlacementTweenOverride') currentItem.itemPlacementTweenOverride = value
+          else if (key === 'OverrideSnap') currentItem.overrideSnap = value === 'True'
+          else if (key === 'RotateToSnapOverride') currentItem.rotateToSnapOverride = value
+          else if (key === 'AlwaysVisibleOnWalls') currentItem.alwaysVisibleOnWalls = value === 'True'
+          else if (key === 'RenderAsWall') currentItem.renderAsWall = value === 'True'
+          else if (key === 'OverrideItemFadingFromCamera') currentItem.overrideItemFadingFromCamera = value === 'True'
+          else if (key === 'CannotBatch') currentItem.cannotBatch = value === 'True'
+          else if (key === 'OverrideItemForAnimation') currentItem.overrideItemForAnimation = value
+          else if (key === 'IgnoreUsageLevelFromTags') currentItem.ignoreUsageLevelFromTags = value === 'True'
+          else if (key === 'DirtinessSpeedTier') currentItem.dirtinessSpeedTier = value
+          else if (key === 'BreakingSpeedTier') currentItem.breakingSpeedTier = value
+          else if (key === 'SynchronizeSwatchAmongVariants') currentItem.synchronizeSwatchAmongVariants = value === 'True'
+          else if (key === 'IgnoreRememberIndexForCategory') currentItem.ignoreRememberIndexForCategory = value === 'True'
+          else if (key === 'HasSizeVariantsOverrides') currentItem.hasSizeVariantsOverrides = value === 'True'
+          else if (key === 'CollectibleCollection') currentItem.collectibleCollection = value
+          else if (key === 'PatreonName') currentItem.patreonName = value
+          else if (key === 'OverrideInteractionGroup') currentItem.overrideInteractionGroup = value === 'True'
+          else if (key === 'OverrideImpostorInteractions') currentItem.overrideImpostorInteractions = value === 'True'
+          continue
+        }
+
+        // 5-space =Key:Value — field inside an array entry
+        if (indent === 5 && line.startsWith('=') && currentArrayEntry) {
+          const cleanProp = line.substring(1)
+          const sep = cleanProp.indexOf(':')
+          if (sep === -1) continue
+          const key = cleanProp.substring(0, sep).trim()
+          const value = cleanProp.substring(sep + 1).trim()
+          currentArrayEntry[key] = value
+          continue
         }
       }
 
-      if (currentItem && currentItem.guid) itemsList.push(currentItem)
+      flushArrayEntry()
+      if (currentItem?.guid) itemsList.push(currentItem)
       return itemsList
     }
 
@@ -437,23 +536,20 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
           // Skip GUID/Value/AssetMesh — these are mesh-registry entries, not component props
           if (pKey === 'GUID' || pKey === 'Value' || pKey === 'AssetMesh') continue
 
-          // Promote the parent property to an object so it can hold sub-properties.
-          // Use a separately-typed `bag` reference (rather than re-indexing the
-          // PrefabPropertyValue union below) so TS knows it's safe to write subkeys into.
+          // Promote the parent property to an object so it can hold sub-properties
           const parent = currentComponent.properties[lastIndent1Key]
-          const bag: Record<string, PrefabPropertyValue | undefined> =
-            typeof parent === 'object' && parent !== null && !Array.isArray(parent)
-              ? parent
-              : { _value: parent } // Preserve the original scalar value under _value
-          currentComponent.properties[lastIndent1Key] = bag
+          if (typeof parent !== 'object' || parent === null || Array.isArray(parent)) {
+            // Preserve the original scalar value under _value
+            currentComponent.properties[lastIndent1Key] = { _value: parent }
+          }
 
           if (pValue.startsWith('(') && pValue.endsWith(')')) {
-            bag[pKey] = pValue
+            currentComponent.properties[lastIndent1Key][pKey] = pValue
               .replace(/[()]/g, '')
               .split(',')
               .map(n => parseFloat(n.trim()) || 0)
           } else {
-            bag[pKey] = isNaN(Number(pValue))
+            currentComponent.properties[lastIndent1Key][pKey] = isNaN(Number(pValue))
               ? pValue
               : parseFloat(pValue)
           }
@@ -510,7 +606,7 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
     const itemThumbnailKeys: Record<string, string> = {}
     await Promise.all(thumbnailFiles.map(async (file, i) => {
       const item = itemsMeta[i]
-      if (!item || !item.guid) return
+      if (!item) return
       const stableKey = `item_thumb_${item.guid}`
       await registerFileInCache(stableKey, file)
       itemThumbnailKeys[item.guid] = stableKey
@@ -521,31 +617,97 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
       const rawPrefabText = prefabContents[targetGuid] || ''
       const extractedComponents = rawPrefabText ? parsePrefabGraph(rawPrefabText) : []
 
-      // Resolve display name via translation map using the stored GUID
+      // Resolve display name via translation map using the stored GUID key.
+      // Only apply camelCase splitting to prefab filenames (identifiers like ClutterPlasticBucket)
+      // — translated names and raw display name strings are already human-readable.
       const translatedName = metaItem.displayNameGuid
         ? (translationMap[`g${metaItem.displayNameGuid}`] ?? translationMap[metaItem.displayNameGuid] ?? null)
         : null
+      const rawDisplayName = typeof metaItem.displayNameGuid === 'string' && !/^\d+$/.test(metaItem.displayNameGuid)
+        ? metaItem.displayNameGuid
+        : null
+      const prefabFileName = prefabGuidToNameMap[targetGuid] ?? null
 
-      // Fall back to prefab file name, then generic label
-      const trackingName = translatedName || prefabGuidToNameMap[targetGuid] || 'Imported Object'
+      const resolvedName = translatedName
+        || rawDisplayName
+        || (prefabFileName ? prefabFileName.replace(/([A-Z])/g, ' $1').replace(/\s+/g, ' ').trim() : null)
+        || 'Imported Object'
 
-      const matchedThumbnailKey = itemThumbnailKeys[metaItem.guid ?? ''] ?? null
+      const matchedThumbnailKey = itemThumbnailKeys[metaItem.guid] ?? null
+
+      // Build typed sub-arrays from the _arrays bag
+      const arrays = metaItem._arrays || {}
+
+      const tags: import('../types/types').ItemTag[] = (arrays['Tag'] || []).map((e: any) => ({
+        guid: e._entryGuid || '',
+        value: e['Value'] || '',
+      }))
+
+      const colorZoneNames: import('../types/types').ItemColorZoneName[] = (arrays['ColorZoneNames'] || []).map((e: any) => ({
+        guid: e._entryGuid || '',
+        value: e['Value'] || '',
+      }))
+
+      const meshParts: import('../types/types').ItemMeshPart[] = (arrays['MeshParts'] || []).map((e: any) => ({
+        guid: e._entryGuid || '',
+        displayName: e['DisplayName'] || '',
+      }))
+
+      const itemVariants: import('../types/types').ItemVariantEntry[] = (arrays['ItemVariants'] || []).map((e: any) => ({
+        guid: e._entryGuid || '',
+        itemVariantGuid: e['ItemVariantGUID'] || '',
+      }))
+
+      const variantGuids = itemVariants.length > 0
+        ? itemVariants.map(v => v.itemVariantGuid).filter(Boolean)
+        : undefined
 
       return {
         id: crypto.randomUUID(),
         guid: metaItem.guid || crypto.randomUUID(),
-        name: trackingName.replace(/([A-Z])/g, ' $1').trim(),
+        name: resolvedName,
         description: 'Imported Mod Object',
-        price: metaItem.price !== undefined ? metaItem.price : 5,
-        tags: ['Imported'],
+        prefabGuid: targetGuid,
+        hideFromCatalog: metaItem.hideFromCatalog ?? false,
+        overrideInteractionGroup: metaItem.overrideInteractionGroup ?? false,
+        overrideImpostorInteractions: metaItem.overrideImpostorInteractions ?? false,
+        tags,
+        hasSwatches: metaItem.hasSwatches ?? false,
+        swatchGroup: metaItem.swatchGroup ?? '',
+        defaultSwatch: metaItem.defaultSwatch ?? '0',
+        swatchColorZoneCount: metaItem.swatchColorZoneCount ?? 0,
+        swatchThumbnailType: metaItem.swatchThumbnailType ?? 1,
+        colorZoneNames,
+        price: metaItem.price ?? 5,
+        priceMultiplier: metaItem.priceMultiplier ?? 1,
+        priceSkinProperty: metaItem.priceSkinProperty ?? 'None',
+        multipurchaseOverride: metaItem.multipurchaseOverride ?? 'NoOverride',
+        autoSelect: metaItem.autoSelect ?? false,
+        itemPlacementTweenOverride: metaItem.itemPlacementTweenOverride ?? 'None',
+        meshParts,
+        ropeItems: [],
+        overrideSnap: metaItem.overrideSnap ?? false,
+        rotateToSnapOverride: metaItem.rotateToSnapOverride ?? 'NoOverride',
+        alwaysVisibleOnWalls: metaItem.alwaysVisibleOnWalls ?? false,
+        renderAsWall: metaItem.renderAsWall ?? false,
+        overrideItemFadingFromCamera: metaItem.overrideItemFadingFromCamera ?? false,
+        cannotBatch: metaItem.cannotBatch ?? false,
+        overrideItemForAnimation: metaItem.overrideItemForAnimation ?? 'None',
+        ignoreUsageLevelFromTags: metaItem.ignoreUsageLevelFromTags ?? false,
+        dirtinessSpeedTier: metaItem.dirtinessSpeedTier ?? 'None',
+        breakingSpeedTier: metaItem.breakingSpeedTier ?? 'None',
+        itemVariants,
+        variantGuids,
+        synchronizeSwatchAmongVariants: metaItem.synchronizeSwatchAmongVariants ?? false,
+        ignoreRememberIndexForCategory: metaItem.ignoreRememberIndexForCategory ?? false,
+        hasSizeVariantsOverrides: metaItem.hasSizeVariantsOverrides ?? false,
+        collectibleCollection: metaItem.collectibleCollection ?? 'None',
+        patreonName: metaItem.patreonName ?? '',
         thumbnailKey: matchedThumbnailKey,
-        variantGuids: metaItem.variantGuids?.length > 0 ? metaItem.variantGuids : undefined,
-        // textureKeys kept as empty {} for backward compatibility with persisted projects.
-        // Slot-bound textures are read from components[].properties (DetailMap, ColorZoneMap)
-        // which is where the game actually looks — not from filename-derived PBR slot names.
+        meshKeys: meshKeysByGuid,  // same map shared across all items in this mod
         textureKeys: {},
         componentBlueprints: { rootDefaultStates: rootStates, materialSurfaces: meshSurfaces },
-        components: extractedComponents
+        components: extractedComponents,
       }
     })
 

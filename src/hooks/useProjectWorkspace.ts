@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useModStore } from '../store/useModStore'
 import type { Item, ComponentNode } from '../types/types'
+import { makeDefaultItem } from '../types/types'
 import type { TranslationWizardPayload } from '../components/CreateModWizard'
-import { getMeshNodes } from '../lib/itemTextureSlots'
 
 /**
  * All workspace logic for the project editor screen.
@@ -96,25 +96,15 @@ export function useProjectWorkspace() {
     currentProject?.items.find((i) => i.id === selectedItemId) ?? null
 
   // ── Node selection (session-only, not persisted) ───────────────────────────
-  // Tracks which ComponentNode (by composite key id+type) is active in the left
-  // panel accordion. A manual pick (handleSelectNode) is tagged with the item id
-  // it belongs to; selectedNodeKey falls back to the item's root node whenever
-  // that tag doesn't match the currently selected item (i.e. the item changed).
-  // This is a pure per-render derivation — no setState call during render needed.
-  const [nodeOverride, setNodeOverride] = useState<{ itemId: string | null; nodeKey: string } | null>(null)
+  // Tracks which ComponentNode (by composite key id+type) is active.
+  // null = Level 0 (item view), set = Level 1+ (node view)
+  const [selectedNodeKey, setSelectedNodeKey] = useState<string | null>(null)
 
-  // Derive the root node key for a given item
-  const getRootNodeKey = useCallback((item: Item | null): string | null => {
-    if (!item) return null
-    const meshNodes = getMeshNodes(item.components || [])
-    const root = meshNodes.find(n => n.childIndex === undefined) ?? meshNodes[0]
-    return root ? `${root.id}_${root.type}` : null
-  }, [])
-
-  const selectedNodeKey =
-    nodeOverride && nodeOverride.itemId === selectedItemId
-      ? nodeOverride.nodeKey
-      : getRootNodeKey(activeSelectedItem)
+  // Clear node selection when the selected item changes
+  // so clicking a different item always starts at Level 0
+  useEffect(() => {
+    setSelectedNodeKey(null)
+  }, [selectedItemId])
 
   // Derive the active node from the key
   const activeSelectedNode: ComponentNode | null = (() => {
@@ -139,18 +129,11 @@ export function useProjectWorkspace() {
   }
 
   const handleAddNewItem = () => {
-    const newItem: Item = {
-      id:   crypto.randomUUID(),
+    const newItem: Item = makeDefaultItem({
+      id: crypto.randomUUID(),
       guid: crypto.randomUUID(),
       name: 'New Custom Item',
-      description: 'Custom decorative mod asset configuration.',
-      price: 5,
-      tags: ['Decorative'],
-      thumbnailKey: null,
-      textureKeys: {},
-      componentBlueprints: { rootDefaultStates: [], materialSurfaces: [] },
-      components: [],
-    }
+    })
     addItemWith(newItem)
   }
 
@@ -158,27 +141,26 @@ export function useProjectWorkspace() {
 
   const handleSelectItem = (item: Item) => {
     setSelectedItemId(item.id)
-    // Node falls back to the new item's root automatically — see selectedNodeKey derivation above
+    setSelectedNodeKey(null)  // always return to Level 0, even if same item clicked again
   }
 
-  const handleSelectNode = useCallback((node: ComponentNode) => {
-    setNodeOverride({ itemId: selectedItemId, nodeKey: `${node.id}_${node.type}` })
-  }, [selectedItemId, setNodeOverride])
+  const handleSelectNode = (node: ComponentNode) => {
+    setSelectedNodeKey(`${node.id}_${node.type}`)
+  }
 
   const handleWizardAdvancedEditing = (partial: Partial<Item> | TranslationWizardPayload) => {
     if ('isTranslation' in partial) return
-    const newItem: Item = {
+    const newItem: Item = makeDefaultItem({
       id:   partial.id   ?? crypto.randomUUID(),
       guid: partial.guid ?? crypto.randomUUID(),
       name: partial.name ?? 'New Mod Item',
       description: partial.description ?? '',
       price: partial.price ?? 0,
-      tags:  partial.tags  ?? [],
       thumbnailKey: partial.thumbnailKey ?? null,
       textureKeys:  partial.textureKeys  ?? {},
       componentBlueprints: partial.componentBlueprints ?? { rootDefaultStates: [], materialSurfaces: [] },
       components: partial.components ?? [],
-    }
+    })
     addItemWith(newItem)
   }
 

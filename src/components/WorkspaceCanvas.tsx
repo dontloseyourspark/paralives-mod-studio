@@ -1,9 +1,10 @@
 // src/components/WorkspaceCanvas.tsx
-import { useState } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import { Plus, Trash } from 'phosphor-react'
 import { useModStore } from '../store/useModStore'
 import ItemsPanel from './ItemsPanel'
 import ItemEditorPanel from './ItemEditorPanel'
+import MeshViewport from './MeshViewport'
 import CreateModWizard, { type TranslationWizardPayload } from './CreateModWizard'
 import TranslationEditorPanel from './TranslationEditorPanel'
 import type { Item, ModProject, ComponentNode } from '../types/types'
@@ -24,6 +25,9 @@ interface WorkspaceCanvasProps {
   onProjectChange: (updated: ModProject) => void
 }
 
+const MIN_EDITOR_WIDTH = 320   // px — editor panel minimum
+const MIN_VIEWPORT_WIDTH = 200 // px — viewport minimum
+
 export default function WorkspaceCanvas({
   project,
   items,
@@ -39,12 +43,19 @@ export default function WorkspaceCanvas({
   onProjectChange,
 }: WorkspaceCanvasProps) {
   const [wizardOpen, setWizardOpen] = useState(false)
+  const [viewportWidth, setViewportWidth] = useState(() =>
+    Math.max(MIN_VIEWPORT_WIDTH, Math.floor(window.innerWidth * 0.60))
+  )
+  const isDragging = useRef(false)
+  const containerRef = useRef<HTMLDivElement>(null)
+
   const registerFileInCache = useModStore((s) => s.registerFileInCache)
   const stringUrlCache = useModStore((s) => s.stringUrlCache)
 
   const modType = project?.modType ?? (items.length > 0 ? 'item' : 'translation')
   const showItemsPanel = modType === 'item' || modType === 'surface'
   const showTranslationEditor = modType === 'translation'
+  const showViewport = showItemsPanel  // 3D viewport only for item mods
 
   const coverThumbnailUrl = project?.coverThumbnailKey
     ? stringUrlCache[project.coverThumbnailKey] ?? localStorage.getItem(`asset_fallback_${project.coverThumbnailKey}`)
@@ -57,9 +68,36 @@ export default function WorkspaceCanvas({
     onProjectChange({ ...project, coverThumbnailKey: key })
   }
 
+  // ── Resizable divider ──────────────────────────────────────────────────────
+  const handleDividerMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    isDragging.current = true
+
+    const onMove = (ev: MouseEvent) => {
+      if (!isDragging.current || !containerRef.current) return
+      const containerRect = containerRef.current.getBoundingClientRect()
+      // Viewport width = distance from right edge of container to mouse
+      const newViewportWidth = containerRect.right - ev.clientX
+      setViewportWidth(Math.max(MIN_VIEWPORT_WIDTH, Math.min(
+        newViewportWidth,
+        containerRect.width - MIN_EDITOR_WIDTH
+      )))
+    }
+
+    const onUp = () => {
+      isDragging.current = false
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }, [])
+
   return (
     <div className="flex-1 flex min-h-0 relative">
 
+      {/* ── Items sidebar ── */}
       {showItemsPanel && (
         <div className="relative h-full flex flex-col shrink-0">
           <ItemsPanel
@@ -94,18 +132,46 @@ export default function WorkspaceCanvas({
         </div>
       )}
 
-      <main className="flex-1 h-full min-w-0 bg-[#0e1017]">
-        {showTranslationEditor ? (
-          <TranslationEditorPanel />
-        ) : (
-          <ItemEditorPanel
-            key={activeSelectedItem?.id}
-            item={activeSelectedItem}
-            activeNode={activeSelectedNode}
-            onSave={onSaveItem}
-          />
+      {/* ── Main area: editor + divider + viewport ── */}
+      <div ref={containerRef} className="flex-1 flex h-full min-w-0">
+
+        {/* Editor panel */}
+        <main className="flex-1 h-full min-w-0 bg-[#0e1017] overflow-hidden">
+          {showTranslationEditor ? (
+            <TranslationEditorPanel />
+          ) : (
+            <ItemEditorPanel
+              key={activeSelectedItem?.id}
+              item={activeSelectedItem}
+              activeNode={activeSelectedNode}
+              onSave={onSaveItem}
+            />
+          )}
+        </main>
+
+        {/* Resizable divider + viewport — item mods only */}
+        {showViewport && (
+          <>
+            {/* Drag handle */}
+            <div
+              onMouseDown={handleDividerMouseDown}
+              className="w-1 h-full bg-white/5 hover:bg-[#8b5cf6]/40 active:bg-[#8b5cf6]/60 cursor-col-resize transition-colors shrink-0 select-none"
+              title="Drag to resize"
+            />
+
+            {/* 3D Viewport */}
+            <div
+              className="h-full shrink-0 overflow-hidden"
+              style={{ width: viewportWidth }}
+            >
+              <MeshViewport
+                meshKeys={activeSelectedItem?.meshKeys ?? {}}
+                activeNode={activeSelectedNode}
+              />
+            </div>
+          </>
         )}
-      </main>
+      </div>
 
       <CreateModWizard
         isOpen={wizardOpen}

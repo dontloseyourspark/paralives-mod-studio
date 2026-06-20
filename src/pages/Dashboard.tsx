@@ -2,6 +2,7 @@
 import DashboardCard from '../components/DashboardCard'
 import { Plus, Folder, WarningCircle, X } from 'phosphor-react'
 import type { ModProject } from '../types/types'
+import { makeDefaultItem } from '../types/types'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useModStore } from '../store/useModStore'
@@ -42,15 +43,15 @@ export default function Dashboard() {
         initialStrings[guid] = ''
       })
 
-      const newTranslation = { 
-        language: payload.language || 'Unknown', 
-        strings: initialStrings 
+      const newTranslation = {
+        language: payload.language || 'Unknown',
+        strings: initialStrings
       }
-      
+
       const updatedProject = {
         ...project,
         modType: 'translation' as const,
-        name: `${payload.language} Translation`, 
+        name: `${payload.language} Translation`,
         translations: [newTranslation],
         updatedAt: new Date().toISOString()
       }
@@ -59,18 +60,17 @@ export default function Dashboard() {
       const partial = payload as Partial<Item>
       const hasContent = partial.name && partial.name !== 'New Mod Item'
       if (hasContent) {
-        const newItem: Item = {
+        const newItem = makeDefaultItem({
           id:   partial.id   ?? crypto.randomUUID(),
           guid: partial.guid ?? crypto.randomUUID(),
           name: partial.name ?? 'New Mod Item',
           description: partial.description ?? '',
           price: partial.price ?? 0,
-          tags:  partial.tags  ?? [],
           thumbnailKey: partial.thumbnailKey ?? null,
           textureKeys:  partial.textureKeys  ?? {},
           componentBlueprints: partial.componentBlueprints ?? { rootDefaultStates: [], materialSurfaces: [] },
           components: partial.components ?? [],
-        }
+        })
         addItemWith(newItem)
       }
     }
