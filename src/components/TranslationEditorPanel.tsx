@@ -1,7 +1,7 @@
 // src/components/TranslationEditorPanel.tsx
 import React, { useState, useMemo, useRef, useEffect } from 'react'
 import { useModStore } from '../store/useModStore'
-import { MagnifyingGlass, CheckCircle, Warning, Code, Image } from 'phosphor-react'
+import { MagnifyingGlass, CheckCircle, Warning, Code, Image, WarningCircle } from 'phosphor-react'
 import JSZip from 'jszip'
 import englishReference from '../data/englishReference.json'
 import TranslationLeftPanel from './TranslationLeftPanel'
@@ -116,9 +116,6 @@ function parseCSV(text: string): string[][] {
           inQuotes = false
         }
       } else if (char === '\n' || char === '\r') {
-        // ← NEW: hard row boundary even inside quotes
-        // Translation strings are single-line; this prevents cascade failures
-        // from malformed inner quotes corrupting all subsequent rows.
         currentRow.push(currentCell)
         rows.push(currentRow)
         currentRow = []
@@ -190,7 +187,6 @@ export default function TranslationEditorPanel() {
   const registerFileInCache = useModStore((state) => state.registerFileInCache)
   const stringUrlCache = useModStore((s) => s.stringUrlCache)
   
-  // The Ultimate Cheat Code: RAM first, Hard Drive second
   const panelCoverUrl = currentProject?.coverThumbnailKey 
     ? stringUrlCache[currentProject.coverThumbnailKey] || localStorage.getItem(`asset_fallback_${currentProject.coverThumbnailKey}`)
     : null
@@ -204,6 +200,7 @@ export default function TranslationEditorPanel() {
   const [isReady, setIsReady] = useState(false)
   const [displayLimit, setDisplayLimit] = useState(50)
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
+  const [thumbnailWarning, setThumbnailWarning] = useState(false)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const thumbnailInputRef = useRef<HTMLInputElement>(null)
@@ -214,7 +211,6 @@ export default function TranslationEditorPanel() {
     return () => clearTimeout(id)
   }, [toast])
   
-  // DIRECT REACTIVE LOOKUP: No boolean gatekeepers.
   const thumbnailUrl = currentProject?.coverThumbnailKey ? stringUrlCache[currentProject.coverThumbnailKey] : null
 
   const handleThumbnailUpload = (file: File) => {
@@ -223,8 +219,16 @@ export default function TranslationEditorPanel() {
       const key = `cover_${currentProject.id}`
       registerFileInCache(key, file)
       updateProject({ ...currentProject, coverThumbnailKey: key })
-      
       setToast({ message: 'Cover image saved — it will appear on your dashboard.', type: 'success' })
+
+      // Check dimensions — Workshop requires exactly 1020×1020
+      const url = URL.createObjectURL(file)
+      const img = new window.Image()
+      img.onload = () => {
+        setThumbnailWarning(img.naturalWidth !== img.naturalHeight || img.naturalWidth !== 1020)
+        URL.revokeObjectURL(url)
+      }
+      img.src = url
     } catch {
       setToast({ message: 'Failed to save cover image. Please try again.', type: 'error' })
     }
@@ -357,7 +361,7 @@ export default function TranslationEditorPanel() {
     const reader = new FileReader()
     reader.onload = (event) => {
     let text = event.target?.result as string
-    text = text.replace(/^\uFEFF/, '') // ← strip UTF-8 BOM (Excel/Sheets default)
+    text = text.replace(/^\uFEFF/, '')
     const parsedRows = parseCSV(text)
       
       if (parsedRows.length < 1) return
@@ -367,22 +371,16 @@ export default function TranslationEditorPanel() {
       let transIndex = firstRow.findIndex(h => h.includes('translation') || h.includes('kolom voor') || h.includes('value'))
       let startRow = 1
 
-      // Handle headerless CSVs: Check if the first row is actually data
-      // Paralives GUIDs typically start with 'g' followed by numbers
       if (guidIndex === -1 && /^g?\d+$/.test(firstRow[0])) {
         guidIndex = 0
-        startRow = 0 // Read from the very first row
+        startRow = 0
       }
-
-      
 
       if (guidIndex === -1) {
         alert('Could not detect a valid GUID column in the CSV.')
         return
       }
 
-      // If the translation column isn't explicitly named, default to index 3 (the 4th column).
-      // If the CSV has fewer columns, fall back to index 2.
       if (transIndex === -1 || transIndex === guidIndex) {
         transIndex = parsedRows[0].length >= 4 ? 3 : 2
       }
@@ -390,15 +388,10 @@ export default function TranslationEditorPanel() {
       const newStrings = { ...activeTranslation.strings }
       for (let i = startRow; i < parsedRows.length; i++) {
         const row = parsedRows[i]
-        
-        // Ensure the row actually contains data up to the targeted indexes
         if (row.length > Math.max(guidIndex, transIndex)) {
           let guid = row[guidIndex].trim()
           if (!guid) continue
-          
-          // Normalize the GUID format
           if (!guid.startsWith('g') && /^\d+$/.test(guid)) guid = 'g' + guid
-          
           newStrings[guid] = row[transIndex]
         }
       }
@@ -484,7 +477,7 @@ export default function TranslationEditorPanel() {
         className="hidden" 
       />
 
-      {/* Primary toolbar row — language tabs + action buttons */}
+      {/* Primary toolbar row */}
       <div className="flex items-center justify-between gap-3 border-b border-white/5 bg-[#161923] px-4 py-2.5 shrink-0">
         <div className="flex items-center gap-4 min-w-0 overflow-x-auto">
           {translations.map((t, i) => (
@@ -498,17 +491,28 @@ export default function TranslationEditorPanel() {
           ))}
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <button 
-            onClick={() => thumbnailInputRef.current?.click()} 
-            className={`flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-xs font-bold transition-colors ${
-              thumbnailUrl 
-                ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' 
-                : 'bg-white/5 border-white/10 text-gray-300 hover:bg-white/10'
-            }`}
-          >
-            <Image size={14} />
-            {thumbnailUrl ? 'Thumbnail Loaded' : 'Set Thumbnail'}
-          </button>
+          {/* Thumbnail button — shows warning badge when dimensions are off */}
+          <div className="relative">
+            <button 
+              onClick={() => thumbnailInputRef.current?.click()} 
+              title={thumbnailWarning ? 'Thumbnail should be exactly 1020×1020 px — click to replace' : undefined}
+              className={`flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-xs font-bold transition-colors ${
+                thumbnailWarning
+                  ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                  : thumbnailUrl 
+                    ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' 
+                    : 'bg-white/5 border-white/10 text-gray-300 hover:bg-white/10'
+              }`}
+            >
+              <Image size={14} />
+              {thumbnailWarning ? 'Bad Size' : thumbnailUrl ? 'Thumbnail Loaded' : 'Set Thumbnail'}
+            </button>
+            {thumbnailWarning && (
+              <span className="absolute -top-1.5 -right-1.5 pointer-events-none">
+                <WarningCircle size={14} weight="fill" className="text-amber-400" />
+              </span>
+            )}
+          </div>
           <button onClick={handleAddString} className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-xs font-bold transition-colors">Add</button>
           <button onClick={() => fileInputRef.current?.click()} className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-xs font-bold transition-colors">Import</button>
           <button onClick={handleExportCSV} className="px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-xs font-bold transition-colors">CSV</button>
@@ -516,7 +520,7 @@ export default function TranslationEditorPanel() {
         </div>
       </div>
 
-      {/* Secondary toolbar row — sort, filter, search */}
+      {/* Secondary toolbar row */}
       <div className="flex flex-wrap items-center gap-2 border-b border-white/10 bg-[#161923] px-4 py-2 shrink-0">
         <div className="flex bg-black/30 border border-white/5 rounded-lg p-0.5 select-none">
           <p className="px-2.5 py-1 text-[11px] font-semibold text-gray-400 uppercase">Sort by:</p>
@@ -567,11 +571,10 @@ export default function TranslationEditorPanel() {
             activeCategoryId={selectedCategory}
             onSelect={(id) => { setSelectedCategory(id); setDisplayLimit(50) }}
             thumbnailUrl={panelCoverUrl}
+            thumbnailWarning={thumbnailWarning}
             onThumbnailUpload={handleThumbnailUpload}
           />
 
-          {/* Editor grid */}
-          
           <div className="flex-1 overflow-y-auto p-6">
             {filteredEntries.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-40 text-gray-500 text-sm border-2 border-dashed border-white/5 rounded-2xl">

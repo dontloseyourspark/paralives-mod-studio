@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useModStore } from '../store/useModStore'
 import type { Item, ComponentNode } from '../types/types'
 import { makeDefaultItem } from '../types/types'
 import type { TranslationWizardPayload } from '../components/CreateModWizard'
+import { getMeshNodes } from '../lib/itemTextureSlots'
 
 /**
  * All workspace logic for the project editor screen.
@@ -96,15 +97,25 @@ export function useProjectWorkspace() {
     currentProject?.items.find((i) => i.id === selectedItemId) ?? null
 
   // ── Node selection (session-only, not persisted) ───────────────────────────
-  // Tracks which ComponentNode (by composite key id+type) is active.
-  // null = Level 0 (item view), set = Level 1+ (node view)
-  const [selectedNodeKey, setSelectedNodeKey] = useState<string | null>(null)
+  // Tracks which ComponentNode (by composite key id+type) is active in the left
+  // panel accordion. A manual pick (handleSelectNode) is tagged with the item id
+  // it belongs to; selectedNodeKey falls back to the item's root node whenever
+  // that tag doesn't match the currently selected item (i.e. the item changed).
+  // This is a pure per-render derivation — no setState call during render needed.
+  const [nodeOverride, setNodeOverride] = useState<{ itemId: string | null; nodeKey: string } | null>(null)
 
-  // Clear node selection when the selected item changes
-  // so clicking a different item always starts at Level 0
-  useEffect(() => {
-    setSelectedNodeKey(null)
-  }, [selectedItemId])
+  // Derive the root node key for a given item
+  const getRootNodeKey = useCallback((item: Item | null): string | null => {
+    if (!item) return null
+    const meshNodes = getMeshNodes(item.components || [])
+    const root = meshNodes.find(n => n.childIndex === undefined) ?? meshNodes[0]
+    return root ? `${root.id}_${root.type}` : null
+  }, [])
+
+  const selectedNodeKey =
+    nodeOverride && nodeOverride.itemId === selectedItemId
+      ? nodeOverride.nodeKey
+      : getRootNodeKey(activeSelectedItem)
 
   // Derive the active node from the key
   const activeSelectedNode: ComponentNode | null = (() => {
@@ -113,6 +124,23 @@ export function useProjectWorkspace() {
       c => `${c.id}_${c.type}` === selectedNodeKey
     ) ?? null
   })()
+
+  // ── Unsaved changes tracking ───────────────────────────────────────────────
+  // savedSnapshot holds a JSON string of currentProject at the last save (or at
+  // first load, so the button starts clean on a fresh open). Stamped directly
+  // during render the first time we have a real project ready — React's
+  // recommended pattern for "remember a value from a previous render" — rather
+  // than via a useEffect, which isn't allowed to call setState directly; and
+  // it's plain state (not a ref) since its value is read during render.
+  const [savedSnapshot, setSavedSnapshot] = useState<string | null>(null)
+  if (storeReady && currentProject && savedSnapshot === null) {
+    setSavedSnapshot(JSON.stringify(currentProject))
+  }
+
+  const hasUnsavedChanges =
+    currentProject !== null &&
+    savedSnapshot !== null &&
+    JSON.stringify(currentProject) !== savedSnapshot
 
   // ── Action handlers ────────────────────────────────────────────────────────
   const [isSaving, setIsSaving] = useState(false)
@@ -125,6 +153,8 @@ export function useProjectWorkspace() {
   const handleSaveProject = async () => {
     setIsSaving(true)
     saveProject()
+    // Stamp the snapshot so the dirty dot clears after saving
+    setSavedSnapshot(JSON.stringify(useModStore.getState().currentProject))
     setTimeout(() => setIsSaving(false), 800)
   }
 
@@ -141,12 +171,12 @@ export function useProjectWorkspace() {
 
   const handleSelectItem = (item: Item) => {
     setSelectedItemId(item.id)
-    setSelectedNodeKey(null)  // always return to Level 0, even if same item clicked again
+    // Node falls back to the new item's root automatically — see selectedNodeKey derivation above
   }
 
-  const handleSelectNode = (node: ComponentNode) => {
-    setSelectedNodeKey(`${node.id}_${node.type}`)
-  }
+  const handleSelectNode = useCallback((node: ComponentNode) => {
+    setNodeOverride({ itemId: selectedItemId, nodeKey: `${node.id}_${node.type}` })
+  }, [selectedItemId, setNodeOverride])
 
   const handleWizardAdvancedEditing = (partial: Partial<Item> | TranslationWizardPayload) => {
     if ('isTranslation' in partial) return
@@ -172,6 +202,7 @@ export function useProjectWorkspace() {
     activeSelectedNode,
     isSaving,
     isRehydrating,
+    hasUnsavedChanges,
     updateProject,
     handleAddNewItem,
     handleDeleteItem,

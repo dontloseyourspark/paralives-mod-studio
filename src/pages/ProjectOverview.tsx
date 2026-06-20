@@ -27,6 +27,7 @@ export default function ProjectOverview() {
     activeSelectedNode,
     isSaving,
     isRehydrating,
+    hasUnsavedChanges,
     updateProject,
     updateItem,
     handleDeleteItem,
@@ -64,6 +65,7 @@ export default function ProjectOverview() {
       <WorkspaceHeader
         project={currentProject}
         isSaving={isSaving}
+        hasUnsavedChanges={hasUnsavedChanges}
         onBack={handleBackToDashboard}
         onSave={handleSaveProject}
         onProjectChange={updateProject}

@@ -7,7 +7,7 @@ import {
 import { useModStore } from '../store/useModStore'
 import { ITEM_MESH_TEXTURE_SLOTS, SLOT_LABELS, CONFIRMED_SLOTS, itemTextureCacheKey } from '../lib/itemTextureSlots'
 import type { ItemMeshTextureSlot } from '../lib/itemTextureSlots'
-import type { Item, ComponentNode } from '../types/types'
+import type { Item, ComponentNode, PrefabPropertyValue } from '../types/types'
 
 interface ItemEditorPanelProps {
   item: Item | null
@@ -33,12 +33,30 @@ function isGuidLike(val: unknown): boolean {
   return false
 }
 
-function isBoolString(val: unknown): val is string {
+function isBoolString(val: unknown): val is 'True' | 'False' {
   return val === 'True' || val === 'False'
 }
 
 function isVector(val: unknown): val is number[] {
   return Array.isArray(val) && val.every(v => typeof v === 'number')
+}
+
+// ─── Toggle switch ────────────────────────────────────────────────────────────
+// Hoisted to module scope — defining this inside ItemEditorPanel's render body
+// recreates the component on every render, resetting any internal state.
+
+interface ToggleProps {
+  value: boolean
+  onChange: (v: boolean) => void
+}
+
+function Toggle({ value, onChange }: ToggleProps) {
+  return (
+    <button onClick={() => onChange(!value)}
+      className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${value ? 'bg-[#8b5cf6]' : 'bg-white/10'}`}>
+      <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${value ? 'left-[18px]' : 'left-0.5'}`} />
+    </button>
+  )
 }
 
 // ─── Slot card ────────────────────────────────────────────────────────────────
@@ -137,7 +155,8 @@ function NodeTexturePanel({ item, node, onSave }: NodeTexturePanelProps) {
   const handleClear = (slot: ItemMeshTextureSlot) => {
     const updatedComponents = item.components.map((c) => {
       if (c.id === node.id && c.type === node.type) {
-        const { [slot]: _r, ...rest } = c.properties
+        const rest = { ...c.properties }
+        delete rest[slot]
         return { ...c, properties: rest }
       }
       return c
@@ -186,8 +205,8 @@ interface BlueprintPanelProps {
 // A single editable property row
 interface PropRowProps {
   propKey: string
-  value: unknown
-  onChange: (key: string, newVal: unknown) => void
+  value: PrefabPropertyValue
+  onChange: (key: string, newVal: PrefabPropertyValue) => void
 }
 
 function PropRow({ propKey, value, onChange }: PropRowProps) {
@@ -331,7 +350,7 @@ interface ComponentSectionProps {
 function ComponentSection({ item, node, defaultOpen = true, onSave }: ComponentSectionProps) {
   const [open, setOpen] = useState(defaultOpen)
 
-  const handleChange = (key: string, newVal: unknown) => {
+  const handleChange = (key: string, newVal: PrefabPropertyValue) => {
     const updatedComponents = item.components.map((c) =>
       c.id === node.id && c.type === node.type
         ? { ...c, properties: { ...c.properties, [key]: newVal } }
@@ -340,7 +359,7 @@ function ComponentSection({ item, node, defaultOpen = true, onSave }: ComponentS
     onSave({ ...item, components: updatedComponents })
   }
 
-  const handleSubChange = (parentKey: string, subKey: string, newVal: unknown) => {
+  const handleSubChange = (parentKey: string, subKey: string, newVal: PrefabPropertyValue) => {
     const updatedComponents = item.components.map((c) => {
       if (c.id === node.id && c.type === node.type) {
         const parent = c.properties[parentKey]
@@ -380,7 +399,7 @@ function ComponentSection({ item, node, defaultOpen = true, onSave }: ComponentS
             propEntries.map(([key, val]) => {
               // Nested sub-property object: { _value?: ..., SubKey: ... }
               if (typeof val === 'object' && val !== null && !Array.isArray(val)) {
-                const { _value, ...subProps } = val as Record<string, unknown>
+                const { _value, ...subProps } = val as Record<string, PrefabPropertyValue | undefined>
                 return (
                   <div key={key} className="mb-1">
                     <div className="flex items-center justify-between gap-3 py-1.5 border-b border-white/3">
@@ -389,7 +408,7 @@ function ComponentSection({ item, node, defaultOpen = true, onSave }: ComponentS
                         isBoolString(_value) ? (
                           <button
                             onClick={() => handleChange(key, {
-                              ...(val as Record<string, unknown>),
+                              ...(val as Record<string, PrefabPropertyValue | undefined>),
                               _value: _value === 'True' ? 'False' : 'True'
                             })}
                             className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${
@@ -410,7 +429,7 @@ function ComponentSection({ item, node, defaultOpen = true, onSave }: ComponentS
                         <PropRow
                           key={subKey}
                           propKey={subKey}
-                          value={subVal}
+                          value={subVal ?? null}
                           onChange={(k, v) => handleSubChange(key, k, v)}
                         />
                       ))}
@@ -534,6 +553,11 @@ function NodeSection({ item, node, onSave }: NodeSectionProps) {
 
 export default function ItemEditorPanel({ item, activeNode, onSave }: ItemEditorPanelProps) {
   const getBlobUrlFromCache = useModStore((state) => state.getBlobUrlFromCache)
+  // WorkspaceCanvas mounts this with key={activeSelectedItem?.id}, so a fresh
+  // instance (and fresh initial state below) is guaranteed whenever item changes.
+  const [name, setName] = useState(item?.name || '')
+  const [price, setPrice] = useState<number>(item?.price ?? 0)
+  const [description, setDescription] = useState(item?.description || '')
 
   if (!item) {
     return (
@@ -545,9 +569,6 @@ export default function ItemEditorPanel({ item, activeNode, onSave }: ItemEditor
   }
 
   const liveThumbnailUrl = getBlobUrlFromCache(item.thumbnailKey ?? null)
-  const [name, setName] = useState(item.name || '')
-  const [price, setPrice] = useState<number>(item.price ?? 0)
-  const [description, setDescription] = useState(item.description || '')
 
   const save = (patch: Partial<Item>) => onSave({ ...item, ...patch })
 
@@ -566,13 +587,6 @@ export default function ItemEditorPanel({ item, activeNode, onSave }: ItemEditor
   const labelClass = "text-[10px] font-bold uppercase tracking-wider text-gray-400"
   const rowClass = "flex items-center justify-between gap-3 py-2 border-b border-white/3 last:border-0"
   const groupLabelClass = "text-[10px] font-semibold uppercase tracking-widest text-gray-600 mt-4 mb-1.5 first:mt-0"
-
-  const Toggle = ({ value, onChange }: { value: boolean, onChange: (v: boolean) => void }) => (
-    <button onClick={() => onChange(!value)}
-      className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${value ? 'bg-[#8b5cf6]' : 'bg-white/10'}`}>
-      <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${value ? 'left-[18px]' : 'left-0.5'}`} />
-    </button>
-  )
 
   // ── Level 0: single scrollable item view ────────────────────────────────────
   if (!activeNode) {

@@ -107,6 +107,9 @@ export default function WorkspaceCanvas({
             onSelectItem={onSelectItem}
             onSelectNode={onSelectNode}
             coverThumbnailUrl={coverThumbnailUrl}
+            // TODO: not wired to real dimension checking yet — always false until
+            // the cover image's actual pixel size is measured against 1020×1020.
+            coverThumbnailWarning={false}
             onCoverUpload={handleCoverUpload}
           />
 

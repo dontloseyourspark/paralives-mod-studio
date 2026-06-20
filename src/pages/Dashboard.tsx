@@ -1,9 +1,9 @@
 // src/pages/Dashboard.tsx
 import DashboardCard from '../components/DashboardCard'
-import { Plus, Folder, WarningCircle, X } from 'phosphor-react'
+import { Plus, Folder, WarningCircle, X, Trash, MagnifyingGlass } from 'phosphor-react'
 import type { ModProject } from '../types/types'
 import { makeDefaultItem } from '../types/types'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useModStore } from '../store/useModStore'
 import ModImporter from '../components/ModImporter'
@@ -18,6 +18,8 @@ export default function Dashboard() {
   const setProject          = useModStore((s) => s.setProject)
   const addItemWith         = useModStore((s) => s.addItemWith)
   const getBlobUrlFromCache = useModStore((s) => s.getBlobUrlFromCache)
+  const deleteProject       = useModStore((s) => s.deleteProject)
+  const clearAllProjects    = useModStore((s) => s.clearAllProjects)
 
   const totalStrings = Object.keys(englishReference).length
   const countCompleted = (project: ModProject) =>
@@ -25,12 +27,25 @@ export default function Dashboard() {
 
   const [wizardOpen, setWizardOpen] = useState(false)
   const [toast, setToast] = useState<{ message: string; type: 'error' | 'info' | 'success' } | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (!toast) return
     const timer = window.setTimeout(() => setToast(null), 3000)
     return () => window.clearTimeout(timer)
   }, [toast])
+
+  const filteredProjects = searchQuery.trim() === ''
+    ? recentProjects
+    : recentProjects.filter((p) => {
+        const q = searchQuery.toLowerCase()
+        return (
+          p.name?.toLowerCase().includes(q) ||
+          p.author?.toLowerCase().includes(q) ||
+          p.modType?.toLowerCase().includes(q)
+        )
+      })
 
   const handleCreateMod = () => setWizardOpen(true)
 
@@ -87,7 +102,7 @@ export default function Dashboard() {
   }
 
   const handleOpenMod = () => {
-    setToast({ message: 'Opening existing mods is not available yet.', type: 'error' })
+    fileInputRef.current?.click()
   }
 
   const handleImportComplete = (importedProject: ModProject) => {
@@ -98,6 +113,19 @@ export default function Dashboard() {
   const handleOpenProject = (project: ModProject) => {
     setProject(project)
     navigate(`/project/${project.id}`)
+  }
+
+  const handleDeleteProject = (e: React.MouseEvent, projectId: string) => {
+    e.stopPropagation()
+    deleteProject(projectId)
+    setToast({ message: 'Project removed from recent projects.', type: 'info' })
+  }
+
+  const handleClearAll = () => {
+    if (!window.confirm(`Remove all ${recentProjects.length} projects from your recent list? This can't be undone.`)) return
+    clearAllProjects()
+    setSearchQuery('')
+    setToast({ message: 'All recent projects cleared.', type: 'info' })
   }
 
   return (
@@ -135,22 +163,71 @@ export default function Dashboard() {
       {/* Import */}
       <section className="flex flex-col gap-4">
         <h2 className="text-lg font-semibold tracking-tight text-gray-300 m-0">Import External Mod Package</h2>
-        <ModImporter onImportComplete={handleImportComplete} />
+        <ModImporter onImportComplete={handleImportComplete} triggerRef={fileInputRef} />
       </section>
 
       {/* Recent Projects */}
       <section className="flex flex-col gap-4">
-        <h2 className="text-lg font-semibold tracking-tight text-gray-300 select-none m-0">Recent Projects</h2>
 
-        {(!recentProjects || recentProjects.length === 0) ? (
+        {/* Section header */}
+        <div className="flex items-center gap-3 select-none">
+          <h2 className="text-lg font-semibold tracking-tight text-gray-300 m-0 shrink-0">Recent Projects</h2>
+
+          {/* Search — only shown when there are projects */}
+          {recentProjects.length > 0 && (
+            <div className="relative flex-1 max-w-56">
+              <MagnifyingGlass
+                size={13}
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none"
+              />
+              <input
+                type="text"
+                placeholder="Filter projects…"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-white/3 border border-white/8 rounded-lg pl-7 pr-7 py-1.5 text-xs text-gray-300 placeholder:text-gray-600 outline-none focus:border-[#8b5cf6]/40 transition-colors"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-600 hover:text-gray-400 transition-colors outline-none cursor-pointer"
+                >
+                  <X size={11} weight="bold" />
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Spacer */}
+          <div className="flex-1" />
+
+          {/* Clear all */}
+          {recentProjects.length > 0 && (
+            <button
+              onClick={handleClearAll}
+              className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-rose-400 transition-colors cursor-pointer outline-none shrink-0"
+            >
+              <Trash size={13} />
+              Clear all
+            </button>
+          )}
+        </div>
+
+        {recentProjects.length === 0 ? (
+          /* No projects at all */
           <div className="text-sm text-gray-500 text-center py-12 px-4 bg-[#161923] rounded-2xl border border-dashed border-white/5 leading-relaxed select-none">
             No recent projects yet. Create or open a mod to get started!
+          </div>
+        ) : filteredProjects.length === 0 ? (
+          /* Projects exist but none match the search */
+          <div className="text-sm text-gray-500 text-center py-12 px-4 bg-[#161923] rounded-2xl border border-dashed border-white/5 leading-relaxed select-none">
+            No projects match <span className="text-gray-400 font-medium">"{searchQuery}"</span>
           </div>
         ) : (
           <>
             {/* Small screens: compact rows */}
             <div className="flex flex-col gap-3 lg:hidden">
-              {recentProjects.map((project) => {
+              {filteredProjects.map((project) => {
                 const liveCoverUrl = project.coverThumbnailKey
                   ? getBlobUrlFromCache(project.coverThumbnailKey)
                   : null
@@ -159,7 +236,7 @@ export default function Dashboard() {
                 return (
                   <div
                     key={project.id}
-                    className="flex flex-row items-center gap-4 p-4 bg-[#161923] border border-white/5 hover:border-white/10 hover:bg-white/2 rounded-2xl cursor-pointer transition-all duration-150 select-none group"
+                    className="relative flex flex-row items-center gap-4 p-4 bg-[#161923] border border-white/5 hover:border-white/10 hover:bg-white/2 rounded-2xl cursor-pointer transition-all duration-150 select-none group"
                     onClick={() => handleOpenProject(project)}
                   >
                     <div className="w-12 h-12 bg-black/20 border border-white/5 rounded-xl overflow-hidden shrink-0 flex items-center justify-center shadow-inner">
@@ -181,9 +258,18 @@ export default function Dashboard() {
                       </p>
                     </div>
 
-                    <span className="text-[11px] text-gray-600 shrink-0">
+                    <span className="text-[11px] text-gray-600 shrink-0 group-hover:opacity-0 transition-opacity">
                       {project.updatedAt ? new Date(project.updatedAt).toLocaleDateString() : '—'}
                     </span>
+
+                    {/* Per-card delete button */}
+                    <button
+                      onClick={(e) => handleDeleteProject(e, project.id)}
+                      title="Remove from recent projects"
+                      className="absolute right-3 opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-gray-500 hover:text-rose-400 hover:bg-rose-500/10 transition-all cursor-pointer outline-none"
+                    >
+                      <X size={13} weight="bold" />
+                    </button>
                   </div>
                 )
               })}
@@ -191,7 +277,7 @@ export default function Dashboard() {
 
             {/* Large screens: cards grid */}
             <div className="hidden lg:grid grid-cols-2 xl:grid-cols-3 gap-4">
-              {recentProjects.map((project) => {
+              {filteredProjects.map((project) => {
                 const liveCoverUrl = project.coverThumbnailKey
                   ? getBlobUrlFromCache(project.coverThumbnailKey)
                   : null
@@ -200,9 +286,18 @@ export default function Dashboard() {
                 return (
                   <div
                     key={project.id}
-                    className="flex flex-col bg-[#161923] border border-white/5 hover:border-[#8b5cf6]/30 hover:bg-white/2 rounded-2xl cursor-pointer transition-all duration-150 select-none group overflow-hidden"
+                    className="relative flex flex-col bg-[#161923] border border-white/5 hover:border-[#8b5cf6]/30 hover:bg-white/2 rounded-2xl cursor-pointer transition-all duration-150 select-none group overflow-hidden"
                     onClick={() => handleOpenProject(project)}
                   >
+                    {/* Per-card delete button */}
+                    <button
+                      onClick={(e) => handleDeleteProject(e, project.id)}
+                      title="Remove from recent projects"
+                      className="absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 p-1.5 rounded-lg bg-black/40 text-gray-400 hover:text-rose-400 hover:bg-rose-500/20 transition-all cursor-pointer outline-none backdrop-blur-sm"
+                    >
+                      <X size={13} weight="bold" />
+                    </button>
+
                     <div className="w-full h-32 bg-black/30 border-b border-white/5 flex items-center justify-center overflow-hidden">
                       {liveCoverUrl ? (
                         <img src={liveCoverUrl} alt={project.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
@@ -249,7 +344,9 @@ export default function Dashboard() {
           <div className={`flex items-center justify-between gap-4 px-4 py-3 rounded-xl border shadow-lg backdrop-blur-md min-w-[300px] max-w-md ${
             toast.type === 'error'
               ? 'bg-rose-950/80 border-rose-500/30 text-rose-200'
-              : 'bg-emerald-950/80 border-emerald-500/30 text-emerald-200'
+              : toast.type === 'success'
+              ? 'bg-emerald-950/80 border-emerald-500/30 text-emerald-200'
+              : 'bg-[#1e2130]/90 border-white/10 text-gray-300'
           }`}>
             <div className="text-sm font-medium">{toast.message}</div>
             <button

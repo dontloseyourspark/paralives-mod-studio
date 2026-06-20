@@ -9,13 +9,24 @@ export interface ItemMeshSurface {
   value: string  // surface asset GUID (6384339467092412900 for non-recolorable)
 }
 
+// A single component property value as parsed from a .prefab file. Flat scalars
+// (string/number/null) and vectors (number[]) appear directly; a property with
+// sub-properties (see ModImporter.tsx's parsePrefabGraph) is promoted to an object
+// keyed by sub-property name, with the original scalar preserved under `_value`.
+export type PrefabPropertyValue =
+  | string
+  | number
+  | number[]
+  | null
+  | { [subKey: string]: PrefabPropertyValue | undefined }
+
 // One node from the parsed prefab graph.
 export interface ComponentNode {
   id: string           // ItemObject GUID from the prefab (stable across imports)
   type: string         // e.g. 'ItemObjectRoot', 'ItemCubeTransform', 'ItemMeshReference'
   nodeName?: string    // Name: field from the ItemObject block ('Root', 'Child', etc.)
   childIndex?: number  // ChildIndex: — undefined for root, 0/1/2 for children
-  properties: Record<string, any>
+  properties: Record<string, PrefabPropertyValue>
   surfaces?: ItemMeshSurface[]
 }
 
@@ -201,7 +212,7 @@ export interface ModProject {
   author: string
   coverThumbnailKey: string | null
   items: Item[]
-  assets: any[]
+  assets: unknown[]  // reserved for future use — never populated with real data yet
   translations?: TranslationData[]
   createdAt: string
   updatedAt: string

@@ -26,6 +26,8 @@ interface ModStoreState {
   getBlobUrlFromCache: (key: string | null) => string | null
   hydrateCacheFromDisk: () => Promise<void>
   clearWorkspaceSession: () => void
+  deleteProject: (projectId: string) => void
+  clearAllProjects: () => void
   purgeEntireStudioDatabase: () => Promise<void>
 }
 
@@ -282,6 +284,60 @@ export const useModStore = create<ModStoreState>()(
 
       clearWorkspaceSession: () => {
         set({ currentProject: null, selectedItemId: null })
+      },
+
+      // ── deleteProject ──────────────────────────────────────────────────────
+      // Removes a single project from recentProjects and cleans up its cover
+      // asset from the cache. If it's the currently open project, clears the
+      // workspace session too.
+      deleteProject: (projectId) => {
+        const state = get()
+        const project = state.recentProjects.find((p) => p.id === projectId)
+        if (!project) return
+
+        const freshUrlCache = { ...state.stringUrlCache }
+
+        // Clean up the cover thumbnail asset
+        if (project.coverThumbnailKey) {
+          assetDb.deleteFile(project.coverThumbnailKey).catch(console.error)
+          if (freshUrlCache[project.coverThumbnailKey]) {
+            URL.revokeObjectURL(freshUrlCache[project.coverThumbnailKey])
+            delete freshUrlCache[project.coverThumbnailKey]
+          }
+        }
+
+        set({
+          recentProjects: state.recentProjects.filter((p) => p.id !== projectId),
+          currentProject: state.currentProject?.id === projectId ? null : state.currentProject,
+          selectedItemId: state.currentProject?.id === projectId ? null : state.selectedItemId,
+          stringUrlCache: freshUrlCache,
+        })
+      },
+
+      // ── clearAllProjects ───────────────────────────────────────────────────
+      // Wipes the entire recent projects list and revokes all cover thumbnail
+      // URLs. Does not touch item-level texture/thumbnail assets (those belong
+      // to items within projects, not the project list itself).
+      clearAllProjects: () => {
+        const state = get()
+        const freshUrlCache = { ...state.stringUrlCache }
+
+        state.recentProjects.forEach((project) => {
+          if (project.coverThumbnailKey) {
+            assetDb.deleteFile(project.coverThumbnailKey).catch(console.error)
+            if (freshUrlCache[project.coverThumbnailKey]) {
+              URL.revokeObjectURL(freshUrlCache[project.coverThumbnailKey])
+              delete freshUrlCache[project.coverThumbnailKey]
+            }
+          }
+        })
+
+        set({
+          recentProjects: [],
+          currentProject: null,
+          selectedItemId: null,
+          stringUrlCache: freshUrlCache,
+        })
       },
 
       purgeEntireStudioDatabase: async () => {

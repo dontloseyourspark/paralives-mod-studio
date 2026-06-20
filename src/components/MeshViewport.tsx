@@ -8,47 +8,54 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { Cube, CircleNotch, UploadSimple } from 'phosphor-react'
 import { assetDb } from '../utils/assetDb'
-import type { ComponentNode } from '../types/types'
+import type { ComponentNode, PrefabPropertyValue } from '../types/types'
+import type { Object3D, Mesh } from 'three'
 
 interface MeshViewportProps {
   meshKeys: Record<string, string>  // fbxAssetGuid → assetDb cache key
   activeNode: ComponentNode | null
 }
 
-type ViewportState = 'empty' | 'loading' | 'ready' | 'error'
+type ViewportState = 'loading' | 'ready' | 'error'
+
+// Resolve which FBX GUID to show:
+// - If active node has an AssetMesh property, use that GUID
+// - Otherwise use the first available mesh key
+function resolveTargetGuid(meshKeys: Record<string, string>, activeNode: ComponentNode | null): string | null {
+  if (activeNode) {
+    // AssetMesh may be a number (parsed by parsePrefabGraph) or a string
+    const assetMesh = activeNode.properties?.AssetMesh
+    if (assetMesh != null) {
+      const guidStr = String(assetMesh)
+      if (meshKeys[guidStr]) return guidStr
+    }
+    // Also check ItemMeshReferences on ItemObjectRoot
+    const meshRefs = activeNode.properties?.ItemMeshReferences
+    if (meshRefs && typeof meshRefs === 'object' && !Array.isArray(meshRefs)) {
+      for (const key of Object.keys(meshRefs)) {
+        const entry = (meshRefs as Record<string, PrefabPropertyValue | undefined>)[key]
+        const assetMeshVal = entry && typeof entry === 'object' && !Array.isArray(entry) ? entry.AssetMesh : undefined
+        if (assetMeshVal != null && meshKeys[String(assetMeshVal)]) {
+          return String(assetMeshVal)
+        }
+      }
+    }
+  }
+  // Fallback: first available mesh
+  const guids = Object.keys(meshKeys)
+  return guids.length > 0 ? guids[0] : null
+}
 
 export default function MeshViewport({ meshKeys, activeNode }: MeshViewportProps) {
   const mountRef = useRef<HTMLDivElement>(null)
   const cleanupRef = useRef<(() => void) | null>(null)
-  const [state, setState] = useState<ViewportState>('empty')
+  const [state, setState] = useState<ViewportState>('loading')
   const [errorMsg, setErrorMsg] = useState('')
 
-  // Resolve which FBX GUID to show:
-  // - If active node has an AssetMesh property, use that GUID
-  // - Otherwise use the first available mesh key
-  const resolveTargetGuid = (): string | null => {
-    if (activeNode) {
-      // AssetMesh may be a number (parsed by parsePrefabGraph) or a string
-      const assetMesh = activeNode.properties?.AssetMesh
-      if (assetMesh != null) {
-        const guidStr = String(assetMesh)
-        if (meshKeys[guidStr]) return guidStr
-      }
-      // Also check ItemMeshReferences on ItemObjectRoot
-      const meshRefs = activeNode.properties?.ItemMeshReferences
-      if (meshRefs && typeof meshRefs === 'object') {
-        for (const key of Object.keys(meshRefs)) {
-          const assetMeshVal = meshRefs[key]?.AssetMesh
-          if (assetMeshVal != null && meshKeys[String(assetMeshVal)]) {
-            return String(assetMeshVal)
-          }
-        }
-      }
-    }
-    // Fallback: first available mesh
-    const guids = Object.keys(meshKeys)
-    return guids.length > 0 ? guids[0] : null
-  }
+  // Derived directly from props — no effect/setState needed for the "nothing to show" case.
+  const targetGuid = resolveTargetGuid(meshKeys, activeNode)
+  const cacheKey = targetGuid ? meshKeys[targetGuid] ?? null : null
+  const isEmpty = !cacheKey
 
   useEffect(() => {
     // Clean up any previous scene
@@ -57,14 +64,7 @@ export default function MeshViewport({ meshKeys, activeNode }: MeshViewportProps
       cleanupRef.current = null
     }
 
-    const targetGuid = resolveTargetGuid()
-
-    if (!targetGuid || !meshKeys[targetGuid]) {
-      setState('empty')
-      return
-    }
-
-    if (!mountRef.current) return
+    if (!cacheKey || !mountRef.current) return
 
     setState('loading')
     const container = mountRef.current
@@ -73,7 +73,6 @@ export default function MeshViewport({ meshKeys, activeNode }: MeshViewportProps
     const init = async () => {
       try {
         // Load FBX blob from assetDb
-        const cacheKey = meshKeys[targetGuid]
         const blob = await assetDb.getFile(cacheKey)
         if (!blob || cancelled) return
 
@@ -157,9 +156,9 @@ export default function MeshViewport({ meshKeys, activeNode }: MeshViewportProps
 
             // Override materials to neutral gray — FBX embedded materials are often
             // black or missing. Once texture slots are applied this can be toggled off.
-            fbx.traverse((child: any) => {
-              if (child.isMesh) {
-                child.material = new THREE.MeshStandardMaterial({
+            fbx.traverse((child: Object3D) => {
+              if ((child as Mesh).isMesh) {
+                ;(child as Mesh).material = new THREE.MeshStandardMaterial({
                   color: 0xd0d0d0,
                   roughness: 0.6,
                   metalness: 0.0,
@@ -239,7 +238,7 @@ export default function MeshViewport({ meshKeys, activeNode }: MeshViewportProps
         cleanupRef.current = null
       }
     }
-  }, [activeNode, JSON.stringify(meshKeys)])
+  }, [cacheKey])
 
   return (
     <div className="relative w-full h-full bg-[#0e1017] flex flex-col">
@@ -247,7 +246,7 @@ export default function MeshViewport({ meshKeys, activeNode }: MeshViewportProps
       <div ref={mountRef} className="flex-1 w-full min-h-0" />
 
       {/* Overlay states */}
-      {state === 'empty' && (
+      {isEmpty && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center pointer-events-none">
           <Cube size={36} weight="thin" className="text-gray-700" />
           <p className="text-xs text-gray-600 max-w-40 leading-relaxed">
@@ -258,14 +257,14 @@ export default function MeshViewport({ meshKeys, activeNode }: MeshViewportProps
         </div>
       )}
 
-      {state === 'loading' && (
+      {!isEmpty && state === 'loading' && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 pointer-events-none">
           <CircleNotch size={24} className="text-[#8b5cf6] animate-spin" />
           <p className="text-xs text-gray-500">Loading mesh…</p>
         </div>
       )}
 
-      {state === 'error' && (
+      {!isEmpty && state === 'error' && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center pointer-events-none">
           <UploadSimple size={24} weight="thin" className="text-red-400/50" />
           <p className="text-xs text-red-400/70">{errorMsg}</p>
@@ -273,7 +272,7 @@ export default function MeshViewport({ meshKeys, activeNode }: MeshViewportProps
       )}
 
       {/* Corner label */}
-      {state === 'ready' && (
+      {!isEmpty && state === 'ready' && (
         <div className="absolute bottom-2 left-3 pointer-events-none">
           <span className="text-[10px] text-gray-700 font-mono">3D Viewport · Drag to orbit · Scroll to zoom</span>
         </div>

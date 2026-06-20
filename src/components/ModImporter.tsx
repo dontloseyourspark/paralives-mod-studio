@@ -4,13 +4,64 @@ import { Folder, UploadSimple } from 'phosphor-react'
 import JSZip from 'jszip'
 import { useModStore } from '../store/useModStore'
 import { assetDb } from '../utils/assetDb'
-import type { ModProject, TranslationData, ComponentNode, ModType } from '../types/types'
+import type { ModProject, TranslationData, ComponentNode, ModType, PrefabPropertyValue } from '../types/types'
 
 interface ModImporterProps {
   onImportComplete: (project: ModProject) => void
+  triggerRef?: React.RefObject<HTMLInputElement | null>
 }
 
-export default function ModImporter({ onImportComplete }: ModImporterProps) {
+// RawArrayEntry — one @GUID entry inside an array block (Tag, ColorZoneNames,
+// MeshParts, ItemVariants). _entryGuid is the entry's own throwaway GUID;
+// every other key is whatever flat field that array's entries carry
+// (Value, DisplayName, ItemVariantGUID, etc).
+interface RawArrayEntry {
+  _entryGuid: string
+  [key: string]: string
+}
+
+// RawItemMeta — one @GUID item entry parsed from Items.setting, before
+// synthesis into a full Item. Mirrors the flat Items.setting fields handled
+// in parseParalivesSetting; structured sub-arrays land in _arrays and are
+// built into typed ItemTag[]/ItemColorZoneName[]/etc. in Object Synthesis.
+interface RawItemMeta {
+  _arrays: Record<string, RawArrayEntry[]>
+  guid?: string
+  modGuid?: string
+  displayNameGuid?: string
+  targetPrefabGuid?: string
+  hideFromCatalog?: boolean
+  hasSwatches?: boolean
+  swatchGroup?: string
+  defaultSwatch?: string
+  swatchColorZoneCount?: number
+  swatchThumbnailType?: number
+  price?: number
+  priceMultiplier?: number
+  priceSkinProperty?: string
+  multipurchaseOverride?: string
+  autoSelect?: boolean
+  itemPlacementTweenOverride?: string
+  overrideSnap?: boolean
+  rotateToSnapOverride?: string
+  alwaysVisibleOnWalls?: boolean
+  renderAsWall?: boolean
+  overrideItemFadingFromCamera?: boolean
+  cannotBatch?: boolean
+  overrideItemForAnimation?: string
+  ignoreUsageLevelFromTags?: boolean
+  dirtinessSpeedTier?: string
+  breakingSpeedTier?: string
+  synchronizeSwatchAmongVariants?: boolean
+  ignoreRememberIndexForCategory?: boolean
+  hasSizeVariantsOverrides?: boolean
+  collectibleCollection?: string
+  patreonName?: string
+  overrideInteractionGroup?: boolean
+  overrideImpostorInteractions?: boolean
+}
+
+export default function ModImporter({ onImportComplete, triggerRef }: ModImporterProps) {
   const [isDragging, setIsDragging] = useState(false)
   const registerFileInCache = useModStore((state) => state.registerFileInCache)
 
@@ -29,7 +80,6 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
       existingKeys
         .filter(k =>
           k.startsWith('item_thumb_') ||
-          k.startsWith('mesh_') ||
           k === 'PROJECT_COVER_MASTER' ||
           (!k.startsWith('cover_'))
         )
@@ -50,11 +100,6 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
     // Thumbnails collected in order — matched positionally to items
     const thumbnailFiles: File[] = []
     let projectCoverKey: string | null = null
-
-    // FBX assets: filename (without .fbx) → { file, assetGuid }
-    // Matched by pairing .fbx with its .fbx.meta sidecar
-    const fbxFiles: Record<string, File> = {}           // basename → File
-    const fbxMetaGuids: Record<string, string> = {}     // basename → GUID from meta
 
     // 1. Normalize file inputs (handles both zip archives and unzipped directories)
     const isArchive = fileList.length === 1 && (fileList[0].name.endsWith('.zip') || fileList[0].name.endsWith('.mod'))
@@ -143,22 +188,6 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
         continue
       }
 
-      // FBX mesh files — store raw bytes, matched to meta GUID below
-      if (path.split('/').length === 2 && path.endsWith('.fbx') && !path.endsWith('.fbx.meta')) {
-        const basename = fileName.replace('.fbx', '')
-        fbxFiles[basename] = await entry.getFile()
-        continue
-      }
-
-      // FBX meta sidecars — extract the asset GUID
-      if (path.split('/').length === 2 && path.endsWith('.fbx.meta')) {
-        const basename = fileName.replace('.fbx.meta', '')
-        const metaText = await entry.text()
-        const guidMatch = metaText.match(/^GUID:(.+)$/m)
-        if (guidMatch) fbxMetaGuids[basename] = guidMatch[1].trim()
-        continue
-      }
-
       // Key cover to project ID — same pattern as manually uploaded covers,
       // so getBlobUrlFromCache finds it and the dashboard displays it correctly
       if (path.split('/').length === 2 && path.endsWith('.mod.thumbnail')) {
@@ -199,19 +228,6 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
       return
     }
 
-    // Register matched FBX files in assetDb (raw bytes — binary mesh data)
-    // and build a guid→cacheKey map for all items to share
-    const meshKeysByGuid: Record<string, string> = {}
-    await Promise.all(
-      Object.entries(fbxFiles).map(async ([basename, file]) => {
-        const assetGuid = fbxMetaGuids[basename]
-        if (!assetGuid) return  // no matching meta — skip
-        const cacheKey = `mesh_${assetGuid}`
-        await assetDb.saveFileRaw(cacheKey, file)
-        meshKeysByGuid[assetGuid] = cacheKey
-      })
-    )
-
     // 3. Parsers
 
     // parseParalivesSetting — captures all Items.setting fields.
@@ -224,12 +240,13 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
     //   5 spaces  =Key:Value — array entry field
     //
     // We track: currentItem → currentArrayKey → currentArrayEntry
-    const parseParalivesSetting = (text: string) => {
+    // (RawArrayEntry / RawItemMeta are declared at module scope above)
+    const parseParalivesSetting = (text: string): RawItemMeta[] => {
       const lines = text.split('\n')
-      const itemsList: any[] = []
-      let currentItem: any = null
+      const itemsList: RawItemMeta[] = []
+      let currentItem: RawItemMeta | null = null
       let currentArrayKey: string | null = null
-      let currentArrayEntry: any = null
+      let currentArrayEntry: RawArrayEntry | null = null
 
       const flushArrayEntry = () => {
         if (!currentItem || !currentArrayKey || !currentArrayEntry) return
@@ -536,20 +553,23 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
           // Skip GUID/Value/AssetMesh — these are mesh-registry entries, not component props
           if (pKey === 'GUID' || pKey === 'Value' || pKey === 'AssetMesh') continue
 
-          // Promote the parent property to an object so it can hold sub-properties
+          // Promote the parent property to an object so it can hold sub-properties.
+          // Use a separately-typed `bag` reference (rather than re-indexing the
+          // PrefabPropertyValue union below) so TS knows it's safe to write subkeys into.
           const parent = currentComponent.properties[lastIndent1Key]
-          if (typeof parent !== 'object' || parent === null || Array.isArray(parent)) {
-            // Preserve the original scalar value under _value
-            currentComponent.properties[lastIndent1Key] = { _value: parent }
-          }
+          const bag: Record<string, PrefabPropertyValue | undefined> =
+            typeof parent === 'object' && parent !== null && !Array.isArray(parent)
+              ? parent
+              : { _value: parent } // Preserve the original scalar value under _value
+          currentComponent.properties[lastIndent1Key] = bag
 
           if (pValue.startsWith('(') && pValue.endsWith(')')) {
-            currentComponent.properties[lastIndent1Key][pKey] = pValue
+            bag[pKey] = pValue
               .replace(/[()]/g, '')
               .split(',')
               .map(n => parseFloat(n.trim()) || 0)
           } else {
-            currentComponent.properties[lastIndent1Key][pKey] = isNaN(Number(pValue))
+            bag[pKey] = isNaN(Number(pValue))
               ? pValue
               : parseFloat(pValue)
           }
@@ -606,7 +626,7 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
     const itemThumbnailKeys: Record<string, string> = {}
     await Promise.all(thumbnailFiles.map(async (file, i) => {
       const item = itemsMeta[i]
-      if (!item) return
+      if (!item || !item.guid) return
       const stableKey = `item_thumb_${item.guid}`
       await registerFileInCache(stableKey, file)
       itemThumbnailKeys[item.guid] = stableKey
@@ -617,43 +637,36 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
       const rawPrefabText = prefabContents[targetGuid] || ''
       const extractedComponents = rawPrefabText ? parsePrefabGraph(rawPrefabText) : []
 
-      // Resolve display name via translation map using the stored GUID key.
-      // Only apply camelCase splitting to prefab filenames (identifiers like ClutterPlasticBucket)
-      // — translated names and raw display name strings are already human-readable.
+      // Resolve display name via translation map using the stored GUID key
       const translatedName = metaItem.displayNameGuid
         ? (translationMap[`g${metaItem.displayNameGuid}`] ?? translationMap[metaItem.displayNameGuid] ?? null)
         : null
-      const rawDisplayName = typeof metaItem.displayNameGuid === 'string' && !/^\d+$/.test(metaItem.displayNameGuid)
-        ? metaItem.displayNameGuid
-        : null
-      const prefabFileName = prefabGuidToNameMap[targetGuid] ?? null
-
-      const resolvedName = translatedName
-        || rawDisplayName
-        || (prefabFileName ? prefabFileName.replace(/([A-Z])/g, ' $1').replace(/\s+/g, ' ').trim() : null)
+      const trackingName = translatedName
+        || (typeof metaItem.displayNameGuid === 'string' && !/^\d+$/.test(metaItem.displayNameGuid) ? metaItem.displayNameGuid : null)
+        || prefabGuidToNameMap[targetGuid]
         || 'Imported Object'
 
-      const matchedThumbnailKey = itemThumbnailKeys[metaItem.guid] ?? null
+      const matchedThumbnailKey = itemThumbnailKeys[metaItem.guid ?? ''] ?? null
 
       // Build typed sub-arrays from the _arrays bag
       const arrays = metaItem._arrays || {}
 
-      const tags: import('../types/types').ItemTag[] = (arrays['Tag'] || []).map((e: any) => ({
+      const tags: import('../types/types').ItemTag[] = (arrays['Tag'] || []).map((e: RawArrayEntry) => ({
         guid: e._entryGuid || '',
         value: e['Value'] || '',
       }))
 
-      const colorZoneNames: import('../types/types').ItemColorZoneName[] = (arrays['ColorZoneNames'] || []).map((e: any) => ({
+      const colorZoneNames: import('../types/types').ItemColorZoneName[] = (arrays['ColorZoneNames'] || []).map((e: RawArrayEntry) => ({
         guid: e._entryGuid || '',
         value: e['Value'] || '',
       }))
 
-      const meshParts: import('../types/types').ItemMeshPart[] = (arrays['MeshParts'] || []).map((e: any) => ({
+      const meshParts: import('../types/types').ItemMeshPart[] = (arrays['MeshParts'] || []).map((e: RawArrayEntry) => ({
         guid: e._entryGuid || '',
         displayName: e['DisplayName'] || '',
       }))
 
-      const itemVariants: import('../types/types').ItemVariantEntry[] = (arrays['ItemVariants'] || []).map((e: any) => ({
+      const itemVariants: import('../types/types').ItemVariantEntry[] = (arrays['ItemVariants'] || []).map((e: RawArrayEntry) => ({
         guid: e._entryGuid || '',
         itemVariantGuid: e['ItemVariantGUID'] || '',
       }))
@@ -665,7 +678,7 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
       return {
         id: crypto.randomUUID(),
         guid: metaItem.guid || crypto.randomUUID(),
-        name: resolvedName,
+        name: trackingName.replace(/([A-Z])/g, ' $1').trim(),
         description: 'Imported Mod Object',
         prefabGuid: targetGuid,
         hideFromCatalog: metaItem.hideFromCatalog ?? false,
@@ -704,7 +717,10 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
         collectibleCollection: metaItem.collectibleCollection ?? 'None',
         patreonName: metaItem.patreonName ?? '',
         thumbnailKey: matchedThumbnailKey,
-        meshKeys: meshKeysByGuid,  // same map shared across all items in this mod
+        // meshKeys: not populated yet — this importer doesn't extract .fbx/.fbx.meta
+        // pairs from the mod archive, so MeshViewport has nothing to show for
+        // imported items until that scan is added.
+        meshKeys: {},
         textureKeys: {},
         componentBlueprints: { rootDefaultStates: rootStates, materialSurfaces: meshSurfaces },
         components: extractedComponents,
@@ -768,7 +784,7 @@ export default function ModImporter({ onImportComplete }: ModImporterProps) {
       <label className="flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-white/5 hover:bg-white/10 rounded-xl cursor-pointer transition-colors mt-2">
         <UploadSimple size={14} weight="bold" />
         <span>Select Folder</span>
-        <input type="file" className="hidden" multiple onChange={(e) => e.target.files && processFiles(e.target.files)} {...directoryAttributes} />
+        <input ref={triggerRef} type="file" className="hidden" multiple onChange={(e) => e.target.files && processFiles(e.target.files)} {...directoryAttributes} />
       </label>
     </div>
   )

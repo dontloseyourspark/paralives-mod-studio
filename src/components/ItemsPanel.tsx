@@ -1,6 +1,6 @@
 // src/components/ItemsPanel.tsx
 import React, { useRef, useState } from 'react'
-import { Image, CaretDown } from 'phosphor-react'
+import { Image, CaretDown, WarningCircle } from 'phosphor-react'
 import { useModStore } from '../store/useModStore'
 import { getMeshNodes } from '../lib/itemTextureSlots'
 import type { Item, ComponentNode } from '../types/types'
@@ -12,6 +12,7 @@ interface ItemsPanelProps {
   onSelectItem: (item: Item) => void
   onSelectNode: (node: ComponentNode) => void
   coverThumbnailUrl: string | null
+  coverThumbnailWarning: boolean
   onCoverUpload: (file: File) => void
 }
 
@@ -54,7 +55,7 @@ function buildItemGroups(items: Item[]): { groups: ItemGroup[], standalones: Ite
   return { groups, standalones }
 }
 
-// ── Node accordion (shown inside a selected item row) ─────────────────────────
+// ── Node accordion ────────────────────────────────────────────────────────────
 interface NodeAccordionProps {
   item: Item
   selectedNodeKey: string | null
@@ -72,7 +73,6 @@ function NodeAccordion({ item, selectedNodeKey, onSelectNode }: NodeAccordionPro
 
   return (
     <div className="mt-1 ml-3 border-l border-white/8 pl-2 flex flex-col gap-0.5">
-      {/* Root node row */}
       <div className="flex items-center gap-1">
         <button
           onClick={() => onSelectNode(root)}
@@ -104,7 +104,6 @@ function NodeAccordion({ item, selectedNodeKey, onSelectNode }: NodeAccordionPro
         )}
       </div>
 
-      {/* Child node rows */}
       {open && children.map((child) => {
         const childKey = `${child.id}_${child.type}`
         const label = child.childIndex !== undefined ? `Child ${child.childIndex}` : 'Child'
@@ -181,7 +180,6 @@ function ItemRow({ item, isSelected, isChild = false, selectedNodeKey, onSelect,
         </div>
       </div>
 
-      {/* Node accordion — only shown when this item is selected */}
       {isSelected && (
         <NodeAccordion
           item={item}
@@ -259,6 +257,7 @@ export default function ItemsPanel({
   onSelectItem,
   onSelectNode,
   coverThumbnailUrl,
+  coverThumbnailWarning,
   onCoverUpload,
 }: ItemsPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -287,31 +286,53 @@ export default function ItemsPanel({
           e.target.value = ''
         }}
       />
+
+      {/* Cover drop zone */}
       <div
         onClick={() => fileInputRef.current?.click()}
         onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
         onDragLeave={() => setDragging(false)}
         onDrop={handleDrop}
-        title={coverThumbnailUrl ? 'Replace mod cover thumbnail' : 'Upload mod cover thumbnail (1020×1020 PNG recommended)'}
-        className="w-full h-32 shrink-0 relative overflow-hidden cursor-pointer group border-b border-white/5"
+        title={
+          coverThumbnailWarning
+            ? 'Thumbnail should be exactly 1020×1020 px — click to replace'
+            : coverThumbnailUrl
+              ? 'Replace mod cover thumbnail'
+              : 'Upload mod cover thumbnail (1020×1020 PNG recommended)'
+        }
+        className="w-full h-32 shrink-0 relative overflow-visible cursor-pointer group border-b border-white/5"
       >
-        {coverThumbnailUrl ? (
-          <>
-            <img src={coverThumbnailUrl} alt="Mod cover" className="w-full h-full object-cover" />
-            <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center gap-1.5 transition-opacity">
-              <Image size={16} className="text-white" weight="light" />
-              <span className="text-white text-[10px] font-semibold tracking-wide">Change Cover</span>
+        {/* Clip inner content separately so the badge can escape */}
+        <div className="absolute inset-0 overflow-hidden">
+          {coverThumbnailUrl ? (
+            <>
+              <img src={coverThumbnailUrl} alt="Mod cover" className="w-full h-full object-cover" />
+              <div className={`absolute inset-0 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center gap-1.5 transition-opacity ${
+                coverThumbnailWarning ? 'bg-amber-900/60' : 'bg-black/60'
+              }`}>
+                <Image size={16} className="text-white" weight="light" />
+                <span className="text-white text-[10px] font-semibold tracking-wide">
+                  {coverThumbnailWarning ? 'Fix Size (1020×1020)' : 'Change Cover'}
+                </span>
+              </div>
+            </>
+          ) : (
+            <div className={`absolute inset-2 rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-2 transition-all ${
+              dragging ? 'border-[#8b5cf6]/60 bg-[#8b5cf6]/5' : 'border-white/10 group-hover:border-white/20'
+            }`}>
+              <Image size={20} weight="light" className={`transition-colors ${dragging ? 'text-[#a78bfa]' : 'text-gray-500 group-hover:text-gray-400'}`} />
+              <span className={`text-[10px] font-medium text-center leading-tight px-3 transition-colors ${dragging ? 'text-[#a78bfa]' : 'text-gray-500 group-hover:text-gray-400'}`}>
+                {dragging ? 'Drop to set cover' : 'Click or drop\nto add cover'}
+              </span>
             </div>
-          </>
-        ) : (
-          <div className={`absolute inset-2 rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-2 transition-all ${
-            dragging ? 'border-[#8b5cf6]/60 bg-[#8b5cf6]/5' : 'border-white/10 group-hover:border-white/20'
-          }`}>
-            <Image size={20} weight="light" className={`transition-colors ${dragging ? 'text-[#a78bfa]' : 'text-gray-500 group-hover:text-gray-400'}`} />
-            <span className={`text-[10px] font-medium text-center leading-tight px-3 transition-colors ${dragging ? 'text-[#a78bfa]' : 'text-gray-500 group-hover:text-gray-400'}`}>
-              {dragging ? 'Drop to set cover' : 'Click or drop\nto add cover'}
-            </span>
-          </div>
+          )}
+        </div>
+
+        {/* Warning badge — escapes the clip */}
+        {coverThumbnailWarning && (
+          <span className="absolute top-1.5 right-1.5 z-10 pointer-events-none">
+            <WarningCircle size={16} weight="fill" className="text-amber-400 drop-shadow-sm" />
+          </span>
         )}
       </div>
 
