@@ -74,7 +74,13 @@ export default function MeshViewport({ meshKeys, activeNode }: MeshViewportProps
       try {
         // Load FBX blob from assetDb
         const blob = await assetDb.getFile(cacheKey)
-        if (!blob || cancelled) return
+        if (cancelled) return
+        if (!blob) {
+          console.error('[MeshViewport] No stored blob found for cache key:', cacheKey)
+          setErrorMsg('Mesh file not found in storage')
+          setState('error')
+          return
+        }
 
         const objectUrl = URL.createObjectURL(blob)
 

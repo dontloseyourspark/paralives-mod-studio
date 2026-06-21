@@ -1,8 +1,9 @@
 // src/components/WorkspaceHeader.tsx
 import { useRef, useState } from 'react'
-import { ArrowLeft, FloppyDisk, Image, WarningCircle } from 'phosphor-react'
+import { ArrowLeft, FloppyDisk, Image, WarningCircle, Export } from 'phosphor-react'
 import type { ModProject } from '../types/types'
 import { useModStore } from '../store/useModStore'
+import { exportItemMod } from '../lib/itemModExporter'
 
 interface WorkspaceHeaderProps {
   project: ModProject
@@ -24,9 +25,26 @@ export default function WorkspaceHeader({
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
   const [thumbnailWarning, setThumbnailWarning] = useState(false)
+  const [isExporting, setIsExporting] = useState(false)
 
   const registerFileInCache = useModStore((s) => s.registerFileInCache)
   const stringUrlCache      = useModStore((s) => s.stringUrlCache)
+
+  const isItemMod = project.modType === 'item'
+
+  const handleSaveOrExport = async () => {
+    onSave()
+    if (!isItemMod) return
+
+    setIsExporting(true)
+    try {
+      await exportItemMod(project)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Export failed.')
+    } finally {
+      setIsExporting(false)
+    }
+  }
 
   // If it's not in RAM, instantly rip it directly from the hard drive!
   const thumbnailUrl = project.coverThumbnailKey 
@@ -164,18 +182,22 @@ export default function WorkspaceHeader({
           </button>
         </div>
 
-        {/* Save button — fills with accent colour and shows a pulsing dot when dirty */}
+        {/* Save/Export button — fills with accent colour and shows a pulsing dot when dirty.
+            Item mods also re-zip and download the mod on click (see exportItemMod). */}
         <button
-          onClick={onSave}
-          disabled={isSaving}
+          onClick={handleSaveOrExport}
+          disabled={isSaving || isExporting}
+          title={isItemMod ? 'Save and download an updated .mod.zip' : undefined}
           className="relative flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold bg-[#8b5cf6] hover:bg-[#7c3aed] disabled:bg-[#8b5cf6]/50 disabled:cursor-not-allowed rounded-xl cursor-pointer text-white shadow-sm transition-colors outline-none"
         >
           {/* Unsaved-changes dot */}
-          {hasUnsavedChanges && !isSaving && (
+          {hasUnsavedChanges && !isSaving && !isExporting && (
             <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-amber-400 shadow-sm animate-pulse" />
           )}
-          <FloppyDisk size={14} weight="bold" />
-          <span>{isSaving ? 'Saving…' : 'Save Mod'}</span>
+          {isItemMod ? <Export size={14} weight="bold" /> : <FloppyDisk size={14} weight="bold" />}
+          <span>
+            {isSaving ? 'Saving…' : isExporting ? 'Exporting…' : isItemMod ? 'Export Mod' : 'Save Mod'}
+          </span>
         </button>
       </div>
     </header>

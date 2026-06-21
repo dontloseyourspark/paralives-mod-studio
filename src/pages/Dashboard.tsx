@@ -16,6 +16,7 @@ export default function Dashboard() {
   const createProject       = useModStore((s) => s.createProject)
   const recentProjects      = useModStore((s) => s.recentProjects)
   const setProject          = useModStore((s) => s.setProject)
+  const setSelectedItemId   = useModStore((s) => s.setSelectedItemId)
   const addItemWith         = useModStore((s) => s.addItemWith)
   const getBlobUrlFromCache = useModStore((s) => s.getBlobUrlFromCache)
   const deleteProject       = useModStore((s) => s.deleteProject)
@@ -107,17 +108,20 @@ export default function Dashboard() {
 
   const handleImportComplete = (importedProject: ModProject) => {
     setProject(importedProject)
+    setSelectedItemId(importedProject.items[0]?.id ?? null)
     navigate(`/project/${importedProject.id}`)
   }
 
   const handleOpenProject = (project: ModProject) => {
     setProject(project)
+    setSelectedItemId(project.items[0]?.id ?? null)
     navigate(`/project/${project.id}`)
   }
 
-  const handleDeleteProject = (e: React.MouseEvent, projectId: string) => {
+  const handleDeleteProject = (e: React.MouseEvent, project: ModProject) => {
     e.stopPropagation()
-    deleteProject(projectId)
+    if (!window.confirm(`Are you sure you want to remove "${project.name || 'Untitled Mod'}" from your recent projects?`)) return
+    deleteProject(project.id)
     setToast({ message: 'Project removed from recent projects.', type: 'info' })
   }
 
@@ -264,7 +268,7 @@ export default function Dashboard() {
 
                     {/* Per-card delete button */}
                     <button
-                      onClick={(e) => handleDeleteProject(e, project.id)}
+                      onClick={(e) => handleDeleteProject(e, project)}
                       title="Remove from recent projects"
                       className="absolute right-3 opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-gray-500 hover:text-rose-400 hover:bg-rose-500/10 transition-all cursor-pointer outline-none"
                     >
@@ -291,7 +295,7 @@ export default function Dashboard() {
                   >
                     {/* Per-card delete button */}
                     <button
-                      onClick={(e) => handleDeleteProject(e, project.id)}
+                      onClick={(e) => handleDeleteProject(e, project)}
                       title="Remove from recent projects"
                       className="absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 p-1.5 rounded-lg bg-black/40 text-gray-400 hover:text-rose-400 hover:bg-rose-500/20 transition-all cursor-pointer outline-none backdrop-blur-sm"
                     >

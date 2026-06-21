@@ -366,8 +366,18 @@ export const useModStore = create<ModStoreState>()(
       }),
       merge: (persistedState: unknown, currentState) => {
         const ps = persistedState as Partial<ModStoreState>
-        // Backfill modType on any persisted projects that predate this field
-        const migrate = (p: ModProject): ModProject => ({ ...p, modType: p.modType ?? ('item' as ModType) })
+        // Backfill modType on any persisted projects that predate this field — and
+        // self-heal projects an earlier version of this migration already
+        // mislabeled 'item' by blindly defaulting instead of inferring from content
+        // (that wrong value then got written back to localStorage on the next save,
+        // so it's "item" today even though it's really a translation mod).
+        // A project with real translation data and no items is a translation mod
+        // no matter what modType says; everything else keeps/gets 'item'.
+        const migrate = (p: ModProject): ModProject => {
+          const looksLikeTranslation = (p.translations?.length ?? 0) > 0 && (p.items?.length ?? 0) === 0
+          if (p.modType && !(p.modType === 'item' && looksLikeTranslation)) return p
+          return { ...p, modType: looksLikeTranslation ? 'translation' : ('item' as ModType) }
+        }
         return {
           ...currentState,
           ...ps,

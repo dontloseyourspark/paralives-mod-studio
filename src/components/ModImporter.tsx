@@ -101,6 +101,12 @@ export default function ModImporter({ onImportComplete, triggerRef }: ModImporte
     const thumbnailFiles: File[] = []
     let projectCoverKey: string | null = null
 
+    // FBX mesh assets: filename (without .fbx) → File, matched to its asset GUID
+    // via the .fbx.meta sidecar of the same basename. Mod-wide (not per-item) —
+    // MeshViewport resolves which GUID to show per node via AssetMesh properties.
+    const fbxFiles: Record<string, File> = {}
+    const fbxMetaGuids: Record<string, string> = {}
+
     // 1. Normalize file inputs (handles both zip archives and unzipped directories)
     const isArchive = fileList.length === 1 && (fileList[0].name.endsWith('.zip') || fileList[0].name.endsWith('.mod'))
 
@@ -142,15 +148,25 @@ export default function ModImporter({ onImportComplete, triggerRef }: ModImporte
       const path = entry.path
       const fileName = entry.name
 
+      // Skip macOS zip cruft: the __MACOSX/ sidecar folder and the ._-prefixed
+      // AppleDouble resource-fork file it creates for every real file when a
+      // folder is zipped via macOS's "Compress" feature. Without this, a real
+      // Settings/Translations.setting and its __MACOSX/.../._Translations.setting
+      // junk twin both match the same endsWith() checks below, and whichever is
+      // processed last silently overwrites the real content with ~200 bytes of
+      // binary AppleDouble header — corrupting (usually emptying) the import.
+      if (path.includes('__MACOSX/') || fileName.startsWith('._')) continue
+
       const rootFolderMatch = path.match(/^([^/]+)\.mod\//i)
       if (rootFolderMatch && detectedLanguageName === 'Unknown') {
         detectedLanguageName = rootFolderMatch[1]
       }
 
-      // _mod.meta holds the stable ModGUID
-      if (path.endsWith('_mod.meta')) {
+      // .mod.meta holds the stable ModGUID. Filename is {Name}_{ModGUID}.mod.meta —
+      // checking endsWith('_mod.meta') (no GUID digits in between) never matches.
+      if (path.endsWith('.mod.meta')) {
         const metaText = await entry.text()
-        const match = metaText.match(/^ModGUID:\s*(.+)$/m)
+        const match = metaText.match(/^GUID:\s*(.+)$/m)
         if (match) detectedModGuid = match[1].trim()
         continue
       }
@@ -185,6 +201,23 @@ export default function ModImporter({ onImportComplete, triggerRef }: ModImporte
       if (path.split('/').length === 2 && path.endsWith('.png')) {
         const textureKey = fileName.replace('.png', '')
         await registerFileInCache(textureKey, await entry.getFile())
+        continue
+      }
+
+      // FBX meta sidecars — extract the asset GUID (checked before the plain
+      // .fbx case below since both share the same root-level depth check)
+      if (path.split('/').length === 2 && path.endsWith('.fbx.meta')) {
+        const basename = fileName.replace('.fbx.meta', '')
+        const metaText = await entry.text()
+        const guidMatch = metaText.match(/^GUID:\s*(.+)$/m)
+        if (guidMatch) fbxMetaGuids[basename] = guidMatch[1].trim()
+        continue
+      }
+
+      // FBX mesh files — store the raw file, matched to its meta GUID below
+      if (path.split('/').length === 2 && path.endsWith('.fbx')) {
+        const basename = fileName.replace('.fbx', '')
+        fbxFiles[basename] = await entry.getFile()
         continue
       }
 
@@ -227,6 +260,19 @@ export default function ModImporter({ onImportComplete, triggerRef }: ModImporte
       alert('Could not locate Items.setting or Translations.setting.')
       return
     }
+
+    // Preserve the original archive so item mods can later be re-exported by
+    // patching just the edited Items.setting fields back into the untouched
+    // original files (see lib/itemModExporter.ts) — rather than regenerating
+    // everything (prefabs, Metacache, etc.) from scratch, which isn't built yet.
+    const originalZipBlob = isArchive
+      ? fileList[0] as Blob
+      : await (async () => {
+          const zip = new JSZip()
+          for (const entry of fileEntries) zip.file(entry.path, await entry.getFile())
+          return zip.generateAsync({ type: 'blob' })
+        })()
+    await assetDb.saveFileRaw(`original_zip_${newProjectId}`, originalZipBlob)
 
     // 3. Parsers
 
@@ -632,6 +678,27 @@ export default function ModImporter({ onImportComplete, triggerRef }: ModImporte
       itemThumbnailKeys[item.guid] = stableKey
     }))
 
+    // Register each FBX under a stable asset-GUID-based key (mesh_{assetGuid}).
+    // Mod-wide, not per-item — every item gets the same map; MeshViewport picks
+    // the right entry per node via its AssetMesh property.
+    //
+    // Uses saveFileRaw (not registerFileInCache) — registerFileInCache routes
+    // through assetDb.saveFile, which assumes every file is a displayable image
+    // and tries to draw it onto a <canvas> for WebP compression. An FBX binary
+    // isn't a valid image, so that draw silently fails and the file never
+    // actually gets persisted — MeshViewport would then hang on "Loading mesh…"
+    // forever (assetDb.getFile resolves null, and the loader has nothing to load).
+    // MeshViewport always reads FBX bytes via assetDb.getFile directly, so there's
+    // no need for the in-memory binaryFileCache/stringUrlCache registerFileInCache provides.
+    const meshKeys: Record<string, string> = {}
+    await Promise.all(Object.entries(fbxFiles).map(async ([basename, file]) => {
+      const assetGuid = fbxMetaGuids[basename]
+      if (!assetGuid) return
+      const stableKey = `mesh_${assetGuid}`
+      await assetDb.saveFileRaw(stableKey, file)
+      meshKeys[assetGuid] = stableKey
+    }))
+
     const parsedItems = itemsMeta.map((metaItem) => {
       const targetGuid = metaItem.targetPrefabGuid || ''
       const rawPrefabText = prefabContents[targetGuid] || ''
@@ -717,10 +784,7 @@ export default function ModImporter({ onImportComplete, triggerRef }: ModImporte
         collectibleCollection: metaItem.collectibleCollection ?? 'None',
         patreonName: metaItem.patreonName ?? '',
         thumbnailKey: matchedThumbnailKey,
-        // meshKeys: not populated yet — this importer doesn't extract .fbx/.fbx.meta
-        // pairs from the mod archive, so MeshViewport has nothing to show for
-        // imported items until that scan is added.
-        meshKeys: {},
+        meshKeys,
         textureKeys: {},
         componentBlueprints: { rootDefaultStates: rootStates, materialSurfaces: meshSurfaces },
         components: extractedComponents,

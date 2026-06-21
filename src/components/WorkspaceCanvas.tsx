@@ -1,5 +1,5 @@
 // src/components/WorkspaceCanvas.tsx
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { Plus, Trash } from 'phosphor-react'
 import { useModStore } from '../store/useModStore'
 import ItemsPanel from './ItemsPanel'
@@ -61,6 +61,27 @@ export default function WorkspaceCanvas({
     ? stringUrlCache[project.coverThumbnailKey] ?? localStorage.getItem(`asset_fallback_${project.coverThumbnailKey}`)
     : null
 
+  // Measures the actual cover image and warns if it isn't exactly 1020×1020.
+  // measuredOversized only matters when there's a cover at all — when there
+  // isn't, coverThumbnailWarning below masks it regardless of stale state.
+  const [measuredOversized, setMeasuredOversized] = useState(false)
+  useEffect(() => {
+    if (!coverThumbnailUrl) return
+    let cancelled = false
+    const img = new Image()
+    img.onload = () => {
+      if (cancelled) return
+      setMeasuredOversized(img.naturalWidth !== 1020 || img.naturalHeight !== 1020)
+    }
+    img.onerror = () => {
+      if (cancelled) return
+      setMeasuredOversized(false)
+    }
+    img.src = coverThumbnailUrl
+    return () => { cancelled = true }
+  }, [coverThumbnailUrl])
+  const coverThumbnailWarning = !!coverThumbnailUrl && measuredOversized
+
   const handleCoverUpload = (file: File) => {
     if (!project) return
     const key = `cover_${project.id}`
@@ -107,9 +128,7 @@ export default function WorkspaceCanvas({
             onSelectItem={onSelectItem}
             onSelectNode={onSelectNode}
             coverThumbnailUrl={coverThumbnailUrl}
-            // TODO: not wired to real dimension checking yet — always false until
-            // the cover image's actual pixel size is measured against 1020×1020.
-            coverThumbnailWarning={false}
+            coverThumbnailWarning={coverThumbnailWarning}
             onCoverUpload={handleCoverUpload}
           />
 
