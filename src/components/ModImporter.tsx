@@ -784,6 +784,7 @@ export default function ModImporter({ onImportComplete, triggerRef }: ModImporte
         collectibleCollection: metaItem.collectibleCollection ?? 'None',
         patreonName: metaItem.patreonName ?? '',
         thumbnailKey: matchedThumbnailKey,
+        displayNameGuid: metaItem.displayNameGuid ?? undefined,
         meshKeys,
         textureKeys: {},
         componentBlueprints: { rootDefaultStates: rootStates, materialSurfaces: meshSurfaces },

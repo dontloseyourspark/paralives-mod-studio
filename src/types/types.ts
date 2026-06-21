@@ -70,6 +70,12 @@ export interface Item {
   name: string         // resolved display name (from Translations.setting lookup)
   description: string  // app-only field, not in Items.setting
 
+  // DisplayName GUID from Items.setting — points to a Translations.setting entry.
+  // Preserved from import so re-export can emit the exact same GUID rather than
+  // generating a placeholder. Undefined for items created fresh in the Studio
+  // (the generator will derive or create one in that case).
+  displayNameGuid?: string
+
   // ── Catalog (Items.setting) ─────────────────────────────────────────────────
   prefabGuid: string            // Prefab: field — references Prefabs.Metacache
   hideFromCatalog: boolean      // HideFromCatalog:
