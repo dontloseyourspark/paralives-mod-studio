@@ -105,7 +105,6 @@ export const assetDb = {
           tx.onabort = () => { db.close(); reject(tx.error) }
           tx.objectStore(STORE_NAME).put(base64String, key)
         })
-        console.log(`[assetDb] Successfully saved ${key} to IndexedDB.`)
         return
       } catch {
         console.warn(`[assetDb] IndexedDB threw an Internal Error. Executing fallback protocol...`)
@@ -114,7 +113,6 @@ export const assetDb = {
       // ATTEMPT 2: The Bulletproof LocalStorage Fallback
       try {
         localStorage.setItem(`asset_fallback_${key}`, base64String)
-        console.log(`[assetDb] Successfully saved compressed ${key} to LocalStorage fallback.`)
       } catch (lsError) {
         console.error(`[assetDb] LocalStorage fallback failed (Quota Exceeded?):`, lsError)
       }
@@ -150,7 +148,6 @@ export const assetDb = {
           tx.onabort = () => { db.close(); reject(tx.error) }
           tx.objectStore(STORE_NAME).put(dataUrl, key)
         })
-        console.log(`[assetDb] Successfully saved ${key} to IndexedDB (raw).`)
         return
       } catch {
         console.warn(`[assetDb] IndexedDB write failed for ${key} (raw). Trying localStorage fallback...`)
@@ -159,7 +156,6 @@ export const assetDb = {
       // ATTEMPT 2: localStorage fallback — will likely fail for large textures
       try {
         localStorage.setItem(`asset_fallback_${key}`, dataUrl)
-        console.log(`[assetDb] Saved ${key} to localStorage fallback (raw).`)
       } catch (lsError) {
         console.warn(`[assetDb] localStorage fallback failed for ${key} (likely too large):`, lsError)
       }

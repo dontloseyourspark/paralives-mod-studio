@@ -33,7 +33,6 @@ export default function App() {
 
   useEffect(() => {
     if (!persistReady) return
-    console.log("🚀 Firing database hydration...")
     useModStore.setState({ hasHydratedDisk: false })
     hydrateCacheFromDisk()
   }, [persistReady, hydrateCacheFromDisk])

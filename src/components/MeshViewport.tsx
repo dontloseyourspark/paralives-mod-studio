@@ -32,26 +32,21 @@ function resolveMeshCacheKey(
   meshKeys: Record<string, string>,
   activeNode: ComponentNode | null,
 ): string | null {
+  // meshKeys is keyed by assetGuid string (from fbx.meta).
+  // AssetMesh on the node is also a raw string (stored without parseFloat in the parser).
+  // Use a prefix-match fallback for any residual precision loss.
+  const findByGuid = (guid: string): string | null => {
+    if (meshKeys[guid]) return meshKeys[guid]
+    const prefix = guid.substring(0, 13)
+    const match = Object.keys(meshKeys).find(k => k.startsWith(prefix))
+    return match ? meshKeys[match] : null
+  }
+
   if (activeNode) {
     const assetMesh = activeNode.properties?.AssetMesh
     if (assetMesh != null) {
-      const guidStr = String(assetMesh)
-      const found = meshKeys[guidStr]
+      const found = findByGuid(String(assetMesh))
       if (found) return found
-    }
-
-    // Also check ItemMeshReferences sub-entries
-    const imr = activeNode.properties?.ItemMeshReferences
-    if (imr && typeof imr === 'object' && !Array.isArray(imr)) {
-      for (const val of Object.values(imr)) {
-        if (val && typeof val === 'object' && !Array.isArray(val)) {
-          const subMesh = (val as Record<string, unknown>).AssetMesh
-          if (subMesh != null) {
-            const found = meshKeys[String(subMesh)]
-            if (found) return found
-          }
-        }
-      }
     }
   }
 

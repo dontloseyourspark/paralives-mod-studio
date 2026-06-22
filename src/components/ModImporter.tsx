@@ -343,6 +343,12 @@ export default function ModImporter({ onImportComplete, triggerRef }: ModImporte
       let inSurfacesBlock = false
       let currentSurface: { guid: string; value: string } | null = null
       let lastIndent1Key: string | null = null
+      // ItemMeshReferences registry: nodeGuid → assetMesh GUID string (raw, not parseFloat'd)
+      // The registry lives on the root node's ItemMeshReference component and maps every
+      // node GUID (root + children) to its AssetMesh. After parsing we do a second pass
+      // to copy AssetMesh onto each component by matching component.id to registry keys.
+      const meshRefRegistry: Record<string, string> = {}
+      let lastMeshRefGuid: string | null = null  // GUID: at indent 2 inside ItemMeshReferences
 
       const flushComponent = () => {
         if (!currentComponent) return
@@ -439,7 +445,16 @@ export default function ModImporter({ onImportComplete, triggerRef }: ModImporte
           if (sepIndex === -1) continue
           const pKey = cleanProp.substring(0, sepIndex).trim()
           const pValue = cleanProp.substring(sepIndex + 1).trim()
-          if (pKey === 'GUID' || pKey === 'Value' || pKey === 'AssetMesh') continue
+
+          // Inside ItemMeshReferences block: capture GUID: entries as registry keys.
+          // AssetMesh lives at indent 3 under each GUID entry — handled below.
+          if (lastIndent1Key === 'ItemMeshReferences') {
+            if (pKey === 'GUID') lastMeshRefGuid = pValue
+            // skip all other indent-2 lines inside this block
+            continue
+          }
+
+          if (pKey === 'GUID' || pKey === 'Value') continue
           const parent = currentComponent.properties[lastIndent1Key]
           const bag: Record<string, PrefabPropertyValue | undefined> =
             typeof parent === 'object' && parent !== null && !Array.isArray(parent) ? parent : { _value: parent }
@@ -449,9 +464,33 @@ export default function ModImporter({ onImportComplete, triggerRef }: ModImporte
           else bag[pKey] = isNaN(Number(pValue)) ? pValue : parseFloat(pValue)
           continue
         }
+
+        // indent 3: AssetMesh inside ItemMeshReferences registry entries
+        if (indent === 3 && lastIndent1Key === 'ItemMeshReferences' && lastMeshRefGuid) {
+          const cleanProp = line.startsWith('=') ? line.substring(1) : line
+          const sepIndex = cleanProp.indexOf(':')
+          if (sepIndex === -1) continue
+          const pKey = cleanProp.substring(0, sepIndex).trim()
+          const pValue = cleanProp.substring(sepIndex + 1).trim()
+          if (pKey === 'AssetMesh') {
+            meshRefRegistry[lastMeshRefGuid] = pValue  // store as raw string — no parseFloat
+            lastMeshRefGuid = null
+          }
+          continue
+        }
       }
 
       flushComponent()
+
+      // Second pass: copy AssetMesh from the registry onto each component by matching
+      // component.id to the registry key. The registry is built from the root node's
+      // ItemMeshReferences block and covers every node (root + all children).
+      for (const c of components) {
+        if (c.type === 'ItemMeshReference' && meshRefRegistry[c.id]) {
+          c.properties['AssetMesh'] = meshRefRegistry[c.id]
+        }
+      }
+
       return components.map(c => ({ ...c, surfaces: c.surfaces && c.surfaces.length > 0 ? c.surfaces : undefined }))
     }
 
