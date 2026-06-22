@@ -2,8 +2,15 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react'
 import type { ComponentNode } from '../types/types'
 import type { Item } from '../types/types'
-import { ITEM_MESH_TEXTURE_SLOTS, itemTextureCacheKey } from '../lib/itemTextureSlots'
+import { itemTextureCacheKey } from '../lib/itemTextureSlots'
 import type { ItemMeshTextureSlot } from '../lib/itemTextureSlots'
+// Type-only import — erased at compile time, so it doesn't pull `three` into
+// the eagerly-loaded bundle. The runtime value still only ever comes from the
+// dynamic `await import('three')` calls inside each effect (lazy-loaded).
+// This is purely so `THREE.Mesh`/`THREE.Group`/etc. can be used as types in
+// places (e.g. the mode-application effect) that don't do their own dynamic
+// import and so have no in-scope runtime `THREE` value to reference.
+import type * as THREE from 'three'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -102,7 +109,19 @@ export function MeshViewport({ meshKeys, activeNode, item }: MeshViewportProps) 
 
   const [viewportState, setViewportState] = useState<'empty' | 'loading' | 'ready' | 'error'>('empty')
   const [mode, setMode] = useState<ViewportMode>('clay')
-  const [hasTexture, setHasTexture] = useState(false)  // true once a texture has been loaded
+
+  // textureInfo is pure-derivable from props, so it's computed during render
+  // rather than re-derived inside the effect — that's what lets hasTexture
+  // below avoid ever needing a setState call just to say "nothing to load".
+  const textureInfo = resolveTextureCacheKey(item, activeNode)
+
+  // loadedTextureKey tracks which cacheKey actually finished loading into the
+  // live Three.js group. hasTexture is derived by comparing it against the
+  // *current* textureInfo — so switching to a node with no texture, or one
+  // whose texture hasn't loaded yet, correctly reads as false without any
+  // effect needing to reset it.
+  const [loadedTextureKey, setLoadedTextureKey] = useState<string | null>(null)
+  const hasTexture = !!textureInfo && loadedTextureKey === textureInfo.cacheKey
 
   // ── Mesh initialisation effect ────────────────────────────────────────────
   // Fires when the target mesh changes. Tears down and rebuilds the whole
@@ -127,7 +146,7 @@ export function MeshViewport({ meshKeys, activeNode, item }: MeshViewportProps) 
       URL.revokeObjectURL(textureUrlRef.current)
       textureUrlRef.current = null
     }
-    setHasTexture(false)
+    setLoadedTextureKey(null)
     setMode('clay')
     viewportReadyRef.current = false
 
@@ -304,16 +323,8 @@ export function MeshViewport({ meshKeys, activeNode, item }: MeshViewportProps) 
   // viewportState) so it always reads the current ready status synchronously
   // rather than a potentially stale React state value.
 
- useEffect(() => {
-  if (!viewportReadyRef.current) return
-  
-  console.log('[tex debug] activeNode:', activeNode?.id, activeNode?.type)
-  console.log('[tex debug] item.components:', item?.components.map(c => `${c.id}_${c.type}`))
-  console.log('[tex debug] textureInfo:', resolveTextureCacheKey(item, activeNode))
-  
-  // ... rest of effect body remains unchanged
-
-    const textureInfo = resolveTextureCacheKey(item, activeNode)
+  useEffect(() => {
+    if (!viewportReadyRef.current) return
 
     // Clean up previous texture URL
     if (textureUrlRef.current) {
@@ -321,10 +332,9 @@ export function MeshViewport({ meshKeys, activeNode, item }: MeshViewportProps) 
       textureUrlRef.current = null
     }
 
-    if (!textureInfo) {
-      setHasTexture(false)
-      return
-    }
+    // Nothing to load for this node — hasTexture already derives to false
+    // above since loadedTextureKey can't match a null textureInfo.
+    if (!textureInfo) return
 
     let cancelled = false
 
@@ -336,7 +346,6 @@ export function MeshViewport({ meshKeys, activeNode, item }: MeshViewportProps) 
         ])
 
         const blob = await assetDb.getFile(textureInfo.cacheKey)
-        console.log('[tex debug] blob:', blob, 'for key:', textureInfo.cacheKey)
         if (!blob || cancelled) return
 
         const url = URL.createObjectURL(blob)
@@ -366,7 +375,7 @@ export function MeshViewport({ meshKeys, activeNode, item }: MeshViewportProps) 
         group._loadedTexture = texture
 
         if (!cancelled) {
-          setHasTexture(true)
+          setLoadedTextureKey(textureInfo.cacheKey)
           setMode('textured')  // auto-switch to textured once loaded
         }
 
@@ -381,7 +390,7 @@ export function MeshViewport({ meshKeys, activeNode, item }: MeshViewportProps) 
       cancelled = true
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewportState, activeNode?.id, item?.guid])
+  }, [viewportState, activeNode?.id, item?.guid, textureInfo?.cacheKey])
 
   // ── Mode application effect ───────────────────────────────────────────────
   // Whenever mode changes, walk the mesh group and update every mesh's material.
