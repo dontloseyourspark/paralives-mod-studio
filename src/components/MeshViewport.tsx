@@ -1,241 +1,293 @@
 // src/components/MeshViewport.tsx
-//
-// 3D mesh viewer for item prefabs. Loads FBX from assetDb via Three.js FBXLoader.
-// Lazy-loads Three.js so it doesn't bloat the initial bundle.
-// Shows the mesh for the currently active node's AssetMesh GUID, falling back
-// to the first available mesh if no node is selected.
+import React, { useEffect, useRef, useState, useCallback } from 'react'
+import type { ComponentNode } from '../types/types'
+import type { Item } from '../types/types'
+import { ITEM_MESH_TEXTURE_SLOTS, itemTextureCacheKey } from '../lib/itemTextureSlots'
+import type { ItemMeshTextureSlot } from '../lib/itemTextureSlots'
 
-import React, { useEffect, useRef, useState } from 'react'
-import { Cube, CircleNotch, UploadSimple } from 'phosphor-react'
-import { assetDb } from '../utils/assetDb'
-import type { ComponentNode, PrefabPropertyValue } from '../types/types'
-import type { Object3D, Mesh } from 'three'
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+type ViewportMode = 'clay' | 'textured' | 'wireframe'
 
 interface MeshViewportProps {
-  meshKeys: Record<string, string>  // fbxAssetGuid → assetDb cache key
+  meshKeys: Record<string, string>
   activeNode: ComponentNode | null
+  item: Item | null
 }
 
-type ViewportState = 'loading' | 'ready' | 'error'
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
-// Resolve which FBX GUID to show:
-// - If active node has an AssetMesh property, use that GUID
-// - Otherwise use the first available mesh key
-function resolveTargetGuid(meshKeys: Record<string, string>, activeNode: ComponentNode | null): string | null {
+/**
+ * Resolve which assetDb cache key to load as the FBX mesh.
+ * Priority: activeNode.AssetMesh → first key in meshKeys → null
+ */
+function resolveMeshCacheKey(
+  meshKeys: Record<string, string>,
+  activeNode: ComponentNode | null,
+): string | null {
   if (activeNode) {
-    // AssetMesh may be a number (parsed by parsePrefabGraph) or a string
     const assetMesh = activeNode.properties?.AssetMesh
     if (assetMesh != null) {
       const guidStr = String(assetMesh)
-      if (meshKeys[guidStr]) return guidStr
+      const found = meshKeys[guidStr]
+      if (found) return found
     }
-    // Also check ItemMeshReferences on ItemObjectRoot
-    const meshRefs = activeNode.properties?.ItemMeshReferences
-    if (meshRefs && typeof meshRefs === 'object' && !Array.isArray(meshRefs)) {
-      for (const key of Object.keys(meshRefs)) {
-        const entry = (meshRefs as Record<string, PrefabPropertyValue | undefined>)[key]
-        const assetMeshVal = entry && typeof entry === 'object' && !Array.isArray(entry) ? entry.AssetMesh : undefined
-        if (assetMeshVal != null && meshKeys[String(assetMeshVal)]) {
-          return String(assetMeshVal)
+
+    // Also check ItemMeshReferences sub-entries
+    const imr = activeNode.properties?.ItemMeshReferences
+    if (imr && typeof imr === 'object' && !Array.isArray(imr)) {
+      for (const val of Object.values(imr)) {
+        if (val && typeof val === 'object' && !Array.isArray(val)) {
+          const subMesh = (val as Record<string, unknown>).AssetMesh
+          if (subMesh != null) {
+            const found = meshKeys[String(subMesh)]
+            if (found) return found
+          }
         }
       }
     }
   }
-  // Fallback: first available mesh
-  const guids = Object.keys(meshKeys)
-  return guids.length > 0 ? guids[0] : null
+
+  const firstKey = Object.values(meshKeys)[0]
+  return firstKey ?? null
 }
 
-export default function MeshViewport({ meshKeys, activeNode }: MeshViewportProps) {
-  const mountRef = useRef<HTMLDivElement>(null)
-  const cleanupRef = useRef<(() => void) | null>(null)
-  const [state, setState] = useState<ViewportState>('loading')
-  const [errorMsg, setErrorMsg] = useState('')
+/**
+ * Find the first texture slot that has a bound GUID for the active node.
+ *
+ * Texture properties (DetailMap, ColorZoneMap, etc.) live exclusively on the
+ * ItemMeshReference component. The activeNode passed from WorkspaceCanvas may
+ * be any component type (ItemObjectRoot, ItemCubeTransform, ItemMeshReference).
+ * We search item.components for the ItemMeshReference that shares the same
+ * node id as activeNode, then check its properties.
+ */
+function resolveTextureCacheKey(
+  item: Item | null,
+  activeNode: ComponentNode | null,
+): { cacheKey: string; slot: ItemMeshTextureSlot } | null {
+  if (!item || !activeNode) return null
 
-  // Derived directly from props — no effect/setState needed for the "nothing to show" case.
-  const targetGuid = resolveTargetGuid(meshKeys, activeNode)
-  const cacheKey = targetGuid ? meshKeys[targetGuid] ?? null : null
-  const isEmpty = !cacheKey
+  // Find the ItemMeshReference component for this node id
+  const meshRefNode = item.components.find(
+    (c) => c.id === activeNode.id && c.type === 'ItemMeshReference'
+  ) ?? (activeNode.type === 'ItemMeshReference' ? activeNode : null)
+
+  if (!meshRefNode) return null
+
+  const priority: ItemMeshTextureSlot[] = ['DetailMap', 'ColorZoneMap', 'DecalMap', 'DirtyOverlay']
+  for (const slot of priority) {
+    const val = meshRefNode.properties?.[slot]
+    if (val != null) {
+      return { cacheKey: itemTextureCacheKey(item.guid, slot), slot }
+    }
+  }
+  return null
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
+export function MeshViewport({ meshKeys, activeNode, item }: MeshViewportProps) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const canvasRef    = useRef<HTMLCanvasElement>(null)
+
+  // Cleanup function stored in a ref so it's always current
+  const cleanupRef = useRef<(() => void) | null>(null)
+
+  // Refs for live Three.js objects — used by texture effect without re-triggering mesh effect
+  const meshGroupRef      = useRef<unknown>(null)  // THREE.Group holding the loaded FBX
+  const rendererRef       = useRef<unknown>(null)  // THREE.WebGLRenderer
+  const sceneRef          = useRef<unknown>(null)  // THREE.Scene
+  const textureUrlRef     = useRef<string | null>(null)  // current blob URL to revoke on cleanup
+  const viewportReadyRef  = useRef(false)           // sync flag — avoids stale closure in texture effect
+
+  const [viewportState, setViewportState] = useState<'empty' | 'loading' | 'ready' | 'error'>('empty')
+  const [mode, setMode] = useState<ViewportMode>('clay')
+  const [hasTexture, setHasTexture] = useState(false)  // true once a texture has been loaded
+
+  // ── Mesh initialisation effect ────────────────────────────────────────────
+  // Fires when the target mesh changes. Tears down and rebuilds the whole
+  // Three.js scene. Does NOT handle texture — that's a separate effect.
 
   useEffect(() => {
-    // Clean up any previous scene
+    const cacheKey = resolveMeshCacheKey(meshKeys, activeNode)
+
+    if (!cacheKey || !canvasRef.current || !containerRef.current) {
+      setViewportState('empty')
+      return
+    }
+
+    // Tear down previous scene
     if (cleanupRef.current) {
       cleanupRef.current()
       cleanupRef.current = null
     }
 
-    if (!cacheKey || !mountRef.current) return
+    // Reset texture state when mesh changes
+    if (textureUrlRef.current) {
+      URL.revokeObjectURL(textureUrlRef.current)
+      textureUrlRef.current = null
+    }
+    setHasTexture(false)
+    setMode('clay')
+    viewportReadyRef.current = false
 
-    setState('loading')
-    const container = mountRef.current
+    setViewportState('loading')
+
     let cancelled = false
 
-    const init = async () => {
+    ;(async () => {
       try {
-        // Load FBX blob from assetDb
-        const blob = await assetDb.getFile(cacheKey)
+        const [THREE, { FBXLoader }, { OrbitControls }, { assetDb }] = await Promise.all([
+          import('three'),
+          import('three/examples/jsm/loaders/FBXLoader.js'),
+          import('three/examples/jsm/controls/OrbitControls.js'),
+          import('../utils/assetDb'),
+        ])
+
         if (cancelled) return
-        if (!blob) {
-          console.error('[MeshViewport] No stored blob found for cache key:', cacheKey)
-          setErrorMsg('Mesh file not found in storage')
-          setState('error')
-          return
-        }
 
-        const objectUrl = URL.createObjectURL(blob)
+        // Load raw FBX bytes
+        const blob = await assetDb.getFile(cacheKey)
+        if (!blob || cancelled) return
 
-        // Lazy-load Three.js — not in the initial bundle
-        const THREE = await import('three')
-        const { FBXLoader } = await import('three/examples/jsm/loaders/FBXLoader.js')
-        const { OrbitControls } = await import('three/examples/jsm/controls/OrbitControls.js')
+        const arrayBuffer = await blob.arrayBuffer()
+        if (cancelled) return
 
-        if (cancelled) {
-          URL.revokeObjectURL(objectUrl)
-          return
-        }
+        // ── Scene setup ──────────────────────────────────────────────────
+        const canvas    = canvasRef.current!
+        const container = containerRef.current!
+        const w = container.clientWidth
+        const h = container.clientHeight
 
-        const width = container.clientWidth
-        const height = container.clientHeight
+        const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false })
+        renderer.setSize(w, h)
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+        renderer.outputColorSpace = THREE.SRGBColorSpace
+        renderer.shadowMap.enabled = false
 
-        // Scene
         const scene = new THREE.Scene()
-        scene.background = new THREE.Color(0x0e1017)
+        scene.background = new THREE.Color(0x1a1a1a)
 
-        // Subtle grid floor
-        const grid = new THREE.GridHelper(10, 20, 0x1a1f2e, 0x1a1f2e)
+        // Grid
+        const grid = new THREE.GridHelper(20, 40, 0x333333, 0x2a2a2a)
         scene.add(grid)
 
-        // Lighting — generous ambient so untextured meshes are always visible
-        const ambient = new THREE.AmbientLight(0xffffff, 1.2)
+        // Lights
+        const ambient = new THREE.AmbientLight(0xffffff, 0.6)
         scene.add(ambient)
-        const hemi = new THREE.HemisphereLight(0xffffff, 0x444466, 0.8)
-        hemi.position.set(0, 20, 0)
-        scene.add(hemi)
-        const dirLight = new THREE.DirectionalLight(0xffffff, 1.5)
-        dirLight.position.set(5, 10, 7)
-        scene.add(dirLight)
-        const fillLight = new THREE.DirectionalLight(0xc8d0e8, 0.6)
-        fillLight.position.set(-5, 2, -5)
-        scene.add(fillLight)
+        const key = new THREE.DirectionalLight(0xffffff, 1.2)
+        key.position.set(5, 8, 5)
+        scene.add(key)
+        const fill = new THREE.DirectionalLight(0xffffff, 0.4)
+        fill.position.set(-5, 3, -5)
+        scene.add(fill)
 
-        // Camera
-        const camera = new THREE.PerspectiveCamera(45, width / height, 0.01, 1000)
-        camera.position.set(2, 1.5, 2)
+        const camera = new THREE.PerspectiveCamera(45, w / h, 0.01, 1000)
 
-        // Renderer
-        const renderer = new THREE.WebGLRenderer({ antialias: true })
-        renderer.setPixelRatio(window.devicePixelRatio)
-        renderer.setSize(width, height)
-        renderer.shadowMap.enabled = false
-        container.appendChild(renderer.domElement)
+        // ── Parse FBX ────────────────────────────────────────────────────
+        const loader = new FBXLoader()
+        const fbxGroup = loader.parse(arrayBuffer, '')
+        if (cancelled) { renderer.dispose(); return }
 
-        // Orbit controls
-        const controls = new OrbitControls(camera, renderer.domElement)
+        // Apply gray material to every mesh
+        const clayMat = new THREE.MeshStandardMaterial({
+          color: 0x999999,
+          roughness: 0.7,
+          metalness: 0.0,
+        })
+
+        fbxGroup.traverse((child: unknown) => {
+          const mesh = child as THREE.Mesh
+          if (mesh.isMesh) {
+            mesh.material = clayMat
+            mesh.castShadow    = false
+            mesh.receiveShadow = false
+          }
+        })
+
+        // Auto-center and fit camera
+        const box    = new THREE.Box3().setFromObject(fbxGroup)
+        const center = box.getCenter(new THREE.Vector3())
+        const size   = box.getSize(new THREE.Vector3())
+        const maxDim = Math.max(size.x, size.y, size.z)
+        const scale  = maxDim > 0 ? 2 / maxDim : 1
+
+        fbxGroup.position.sub(center.multiplyScalar(scale))
+        fbxGroup.scale.setScalar(scale)
+
+        // Re-check bounds after scale for camera placement
+        const scaledBox    = new THREE.Box3().setFromObject(fbxGroup)
+        const scaledCenter = scaledBox.getCenter(new THREE.Vector3())
+        const scaledSize   = scaledBox.getSize(new THREE.Vector3())
+        const scaledMax    = Math.max(scaledSize.x, scaledSize.y, scaledSize.z)
+
+        camera.position.set(
+          scaledCenter.x + scaledMax * 1.2,
+          scaledCenter.y + scaledMax * 0.8,
+          scaledCenter.z + scaledMax * 1.5,
+        )
+        camera.lookAt(scaledCenter)
+
+        scene.add(fbxGroup)
+
+        // Store refs for texture effect
+        meshGroupRef.current = fbxGroup
+        rendererRef.current  = renderer
+        sceneRef.current     = scene
+
+        // ── Controls ─────────────────────────────────────────────────────
+        const controls = new OrbitControls(camera, canvas)
+        controls.target.copy(scaledCenter)
         controls.enableDamping = true
         controls.dampingFactor = 0.08
-        controls.minDistance = 0.1
-        controls.maxDistance = 50
+        controls.update()
 
-        // Load FBX
-        const loader = new FBXLoader()
-        loader.load(
-          objectUrl,
-          (fbx) => {
-            if (cancelled) return
-
-            // Normalize scale and center the model
-            const box = new THREE.Box3().setFromObject(fbx)
-            const size = box.getSize(new THREE.Vector3())
-            const maxDim = Math.max(size.x, size.y, size.z)
-            const scale = maxDim > 0 ? 2 / maxDim : 1
-            fbx.scale.setScalar(scale)
-
-            // Re-center after scale
-            const box2 = new THREE.Box3().setFromObject(fbx)
-            const center = box2.getCenter(new THREE.Vector3())
-            fbx.position.sub(center)
-            // Sit on the grid
-            const box3 = new THREE.Box3().setFromObject(fbx)
-            fbx.position.y -= box3.min.y
-
-            scene.add(fbx)
-
-            // Override materials to neutral gray — FBX embedded materials are often
-            // black or missing. Once texture slots are applied this can be toggled off.
-            fbx.traverse((child: Object3D) => {
-              if ((child as Mesh).isMesh) {
-                ;(child as Mesh).material = new THREE.MeshStandardMaterial({
-                  color: 0xd0d0d0,
-                  roughness: 0.6,
-                  metalness: 0.0,
-                })
-              }
-            })
-
-            // Point camera at model
-            const box4 = new THREE.Box3().setFromObject(fbx)
-            const center4 = box4.getCenter(new THREE.Vector3())
-            controls.target.copy(center4)
-            camera.position.set(
-              center4.x + 2,
-              center4.y + 1.5,
-              center4.z + 2
-            )
-            controls.update()
-
-            setState('ready')
-          },
-          undefined,
-          (err) => {
-            console.error('[MeshViewport] FBX load error:', err)
-            setErrorMsg('Failed to parse FBX file')
-            setState('error')
-          }
-        )
-
-        // Animation loop
-        let animId: number
+        // ── Render loop ──────────────────────────────────────────────────
+        let rafId: number
         const animate = () => {
-          animId = requestAnimationFrame(animate)
+          rafId = requestAnimationFrame(animate)
           controls.update()
           renderer.render(scene, camera)
         }
         animate()
 
-        // Resize observer
+        // ── Resize observer ──────────────────────────────────────────────
         const ro = new ResizeObserver(() => {
-          if (!container || cancelled) return
-          const w = container.clientWidth
-          const h = container.clientHeight
-          camera.aspect = w / h
+          if (!container || !renderer) return
+          const nw = container.clientWidth
+          const nh = container.clientHeight
+          camera.aspect = nw / nh
           camera.updateProjectionMatrix()
-          renderer.setSize(w, h)
+          renderer.setSize(nw, nh)
         })
         ro.observe(container)
 
-        // Cleanup
+        if (!cancelled) {
+          viewportReadyRef.current = true
+          setViewportState('ready')
+        }
+
+        // ── Cleanup ──────────────────────────────────────────────────────
         cleanupRef.current = () => {
           cancelled = true
-          cancelAnimationFrame(animId)
+          cancelAnimationFrame(rafId)
           ro.disconnect()
           controls.dispose()
           renderer.dispose()
-          URL.revokeObjectURL(objectUrl)
-          if (renderer.domElement.parentNode === container) {
-            container.removeChild(renderer.domElement)
-          }
+          clayMat.dispose()
+          meshGroupRef.current = null
+          rendererRef.current  = null
+          sceneRef.current     = null
+          viewportReadyRef.current = false
         }
 
       } catch (err) {
         if (!cancelled) {
-          console.error('[MeshViewport] init error:', err)
-          setErrorMsg('Could not initialise 3D viewer')
-          setState('error')
+          console.error('[MeshViewport] FBX load error:', err)
+          setViewportState('error')
         }
       }
-    }
-
-    init()
+    })()
 
     return () => {
       cancelled = true
@@ -244,45 +296,246 @@ export default function MeshViewport({ meshKeys, activeNode }: MeshViewportProps
         cleanupRef.current = null
       }
     }
-  }, [cacheKey])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(meshKeys), activeNode?.id])
+
+  // ── Texture loading effect ────────────────────────────────────────────────
+  // Fires when activeNode or item changes. Uses viewportReadyRef (not
+  // viewportState) so it always reads the current ready status synchronously
+  // rather than a potentially stale React state value.
+
+ useEffect(() => {
+  if (!viewportReadyRef.current) return
+  
+  console.log('[tex debug] activeNode:', activeNode?.id, activeNode?.type)
+  console.log('[tex debug] item.components:', item?.components.map(c => `${c.id}_${c.type}`))
+  console.log('[tex debug] textureInfo:', resolveTextureCacheKey(item, activeNode))
+  
+  // ... rest of effect body remains unchanged
+
+    const textureInfo = resolveTextureCacheKey(item, activeNode)
+
+    // Clean up previous texture URL
+    if (textureUrlRef.current) {
+      URL.revokeObjectURL(textureUrlRef.current)
+      textureUrlRef.current = null
+    }
+
+    if (!textureInfo) {
+      setHasTexture(false)
+      return
+    }
+
+    let cancelled = false
+
+    ;(async () => {
+      try {
+        const [THREE, { assetDb }] = await Promise.all([
+          import('three'),
+          import('../utils/assetDb'),
+        ])
+
+        const blob = await assetDb.getFile(textureInfo.cacheKey)
+        console.log('[tex debug] blob:', blob, 'for key:', textureInfo.cacheKey)
+        if (!blob || cancelled) return
+
+        const url = URL.createObjectURL(blob)
+        textureUrlRef.current = url
+
+        const texture = await new THREE.TextureLoader().loadAsync(url)
+        if (cancelled) {
+          texture.dispose()
+          URL.revokeObjectURL(url)
+          textureUrlRef.current = null
+          return
+        }
+
+        // FBX UV coordinates are top-down; Three.js defaults to bottom-up.
+        // flipY = false corrects the vertical flip.
+        texture.flipY = false
+        texture.colorSpace = THREE.SRGBColorSpace
+
+        // Store texture on the group so the mode toggle can reference it
+        const group = meshGroupRef.current as (THREE.Group & { _loadedTexture?: THREE.Texture }) | null
+        if (!group) return
+
+        // Dispose previous loaded texture if any
+        if (group._loadedTexture) {
+          group._loadedTexture.dispose()
+        }
+        group._loadedTexture = texture
+
+        if (!cancelled) {
+          setHasTexture(true)
+          setMode('textured')  // auto-switch to textured once loaded
+        }
+
+      } catch (err) {
+        if (!cancelled) {
+          console.error('[MeshViewport] Texture load error:', err)
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewportState, activeNode?.id, item?.guid])
+
+  // ── Mode application effect ───────────────────────────────────────────────
+  // Whenever mode changes, walk the mesh group and update every mesh's material.
+
+  useEffect(() => {
+    const group = meshGroupRef.current as (THREE.Group & { _loadedTexture?: THREE.Texture }) | null
+    if (!group) return
+
+    group.traverse((child: unknown) => {
+      const mesh = child as THREE.Mesh
+      if (!mesh.isMesh) return
+
+      const mat = mesh.material as THREE.MeshStandardMaterial
+      if (!mat) return
+
+      if (mode === 'wireframe') {
+        mat.wireframe = true
+        mat.map = null
+        mat.needsUpdate = true
+      } else if (mode === 'textured' && group._loadedTexture) {
+        mat.wireframe = false
+        mat.map = group._loadedTexture
+        mat.needsUpdate = true
+      } else {
+        // clay
+        mat.wireframe = false
+        mat.map = null
+        mat.needsUpdate = true
+      }
+    })
+  }, [mode])
+
+  // ── Texture URL cleanup on unmount ────────────────────────────────────────
+  useEffect(() => {
+    return () => {
+      if (textureUrlRef.current) {
+        URL.revokeObjectURL(textureUrlRef.current)
+        textureUrlRef.current = null
+      }
+    }
+  }, [])
+
+  // ── Mode toggle handler ───────────────────────────────────────────────────
+  const cycleMode = useCallback((next: ViewportMode) => {
+    setMode(next)
+  }, [])
+
+  // ── Render ────────────────────────────────────────────────────────────────
+
+  const hasMesh = Object.keys(meshKeys).length > 0
 
   return (
-    <div className="relative w-full h-full bg-[#0e1017] flex flex-col">
-      {/* Three.js mount target */}
-      <div ref={mountRef} className="flex-1 w-full min-h-0" />
+    <div className="relative w-full h-full bg-[#1a1a1a] flex flex-col overflow-hidden">
 
-      {/* Overlay states */}
-      {isEmpty && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center pointer-events-none">
-          <Cube size={36} weight="thin" className="text-gray-700" />
-          <p className="text-xs text-gray-600 max-w-40 leading-relaxed">
-            {Object.keys(meshKeys).length === 0
-              ? 'No FBX files found in this mod'
-              : 'Select a node to preview its mesh'}
-          </p>
+      {/* Three.js canvas — always mounted so the ref is stable */}
+      <canvas
+        ref={canvasRef}
+        className="absolute inset-0 w-full h-full"
+        style={{ display: viewportState === 'ready' ? 'block' : 'none' }}
+      />
+
+      {/* Container div used for ResizeObserver and layout.
+          pointer-events-none so mouse events reach the canvas for OrbitControls. */}
+      <div ref={containerRef} className="absolute inset-0 pointer-events-none" />
+
+      {/* ── Overlays ── */}
+
+      {viewportState === 'empty' && (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="flex flex-col items-center gap-2 text-gray-600">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+            </svg>
+            <p className="text-[11px]">{hasMesh ? 'Select a node to preview' : 'No mesh imported'}</p>
+          </div>
         </div>
       )}
 
-      {!isEmpty && state === 'loading' && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 pointer-events-none">
-          <CircleNotch size={24} className="text-[#8b5cf6] animate-spin" />
-          <p className="text-xs text-gray-500">Loading mesh…</p>
+      {viewportState === 'loading' && (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="flex flex-col items-center gap-2 text-gray-500">
+            <div className="w-5 h-5 border-2 border-gray-600 border-t-gray-400 rounded-full animate-spin" />
+            <p className="text-[11px]">Loading mesh…</p>
+          </div>
         </div>
       )}
 
-      {!isEmpty && state === 'error' && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center pointer-events-none">
-          <UploadSimple size={24} weight="thin" className="text-red-400/50" />
-          <p className="text-xs text-red-400/70">{errorMsg}</p>
+      {viewportState === 'error' && (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="flex flex-col items-center gap-2 text-red-500/60">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+            <p className="text-[11px]">Failed to parse FBX</p>
+          </div>
         </div>
       )}
 
-      {/* Corner label */}
-      {!isEmpty && state === 'ready' && (
-        <div className="absolute bottom-2 left-3 pointer-events-none">
-          <span className="text-[10px] text-gray-700 font-mono">3D Viewport · Drag to orbit · Scroll to zoom</span>
+      {/* ── Mode toggle toolbar (only visible when mesh is ready) ── */}
+      {viewportState === 'ready' && (
+        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-0.5 bg-black/60 backdrop-blur-sm border border-white/10 rounded-lg p-1 z-10">
+          <ModeButton
+            label="Clay"
+            active={mode === 'clay'}
+            onClick={() => cycleMode('clay')}
+          />
+          <ModeButton
+            label="Textured"
+            active={mode === 'textured'}
+            disabled={!hasTexture}
+            onClick={() => hasTexture && cycleMode('textured')}
+            title={hasTexture ? 'Show texture' : 'No texture uploaded for this node'}
+          />
+          <ModeButton
+            label="Wire"
+            active={mode === 'wireframe'}
+            onClick={() => cycleMode('wireframe')}
+          />
         </div>
       )}
     </div>
   )
 }
+
+// ── Mode button ───────────────────────────────────────────────────────────────
+
+interface ModeButtonProps {
+  label: string
+  active: boolean
+  disabled?: boolean
+  onClick: () => void
+  title?: string
+}
+
+function ModeButton({ label, active, disabled = false, onClick, title }: ModeButtonProps) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      disabled={disabled}
+      className={[
+        'px-2.5 py-1 rounded-md text-[10px] font-medium tracking-wide transition-colors',
+        active
+          ? 'bg-white/15 text-white'
+          : disabled
+            ? 'text-gray-600 cursor-not-allowed'
+            : 'text-gray-400 hover:text-gray-200 hover:bg-white/8',
+      ].join(' ')}
+    >
+      {label}
+    </button>
+  )
+}
+
+export default MeshViewport

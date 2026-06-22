@@ -187,8 +187,9 @@ export default function WorkspaceCanvas({
               style={{ width: viewportWidth }}
             >
               <MeshViewport
-                meshKeys={activeSelectedItem?.meshKeys ?? {}}
-                activeNode={activeSelectedNode}
+              meshKeys={activeSelectedItem?.meshKeys ?? {}}
+              activeNode={activeSelectedNode}
+              item={activeSelectedItem}
               />
             </div>
           </>

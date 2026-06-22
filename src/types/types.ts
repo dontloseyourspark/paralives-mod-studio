@@ -220,6 +220,7 @@ export interface ModProject {
   items: Item[]
   assets: unknown[]  // reserved for future use — never populated with real data yet
   translations?: TranslationData[]
+  workshopTags: string[]  // Steam Workshop publishing tags — see data/workshopTags.ts
   createdAt: string
   updatedAt: string
 }

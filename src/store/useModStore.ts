@@ -94,6 +94,7 @@ export const useModStore = create<ModStoreState>()(
           items: [],
           assets: [],
           translations: [],
+          workshopTags: [],
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         }

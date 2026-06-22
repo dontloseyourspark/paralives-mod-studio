@@ -1,9 +1,10 @@
 // src/components/WorkspaceHeader.tsx
 import { useRef, useState } from 'react'
-import { ArrowLeft, FloppyDisk, Image, WarningCircle, Export } from 'phosphor-react'
+import { ArrowLeft, FloppyDisk, Image, WarningCircle, Export, Tag } from 'phosphor-react'
 import type { ModProject } from '../types/types'
 import { useModStore } from '../store/useModStore'
 import { exportItemMod } from '../lib/itemModExporter'
+import WorkshopTagsModal from './WorkshopTagsModal'
 
 interface WorkspaceHeaderProps {
   project: ModProject
@@ -26,6 +27,7 @@ export default function WorkspaceHeader({
   const [dragging, setDragging] = useState(false)
   const [thumbnailWarning, setThumbnailWarning] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
+  const [tagsModalOpen, setTagsModalOpen] = useState(false)
 
   const registerFileInCache = useModStore((s) => s.registerFileInCache)
   const stringUrlCache      = useModStore((s) => s.stringUrlCache)
@@ -182,6 +184,16 @@ export default function WorkspaceHeader({
           </button>
         </div>
 
+        {/* Workshop tags — editable any time, independent of save/export */}
+        <button
+          onClick={() => setTagsModalOpen(true)}
+          title="Edit Steam Workshop tags"
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-white/5 hover:bg-white/10 rounded-xl cursor-pointer text-gray-300 hover:text-white transition-colors outline-none"
+        >
+          <Tag size={14} weight="bold" />
+          <span>Tags{(project.workshopTags?.length ?? 0) > 0 ? ` (${project.workshopTags.length})` : ''}</span>
+        </button>
+
         {/* Save/Export button — fills with accent colour and shows a pulsing dot when dirty.
             Item mods also re-zip and download the mod on click (see exportItemMod). */}
         <button
@@ -200,6 +212,14 @@ export default function WorkspaceHeader({
           </span>
         </button>
       </div>
+
+      {tagsModalOpen && (
+        <WorkshopTagsModal
+          project={project}
+          onProjectChange={onProjectChange}
+          onClose={() => setTagsModalOpen(false)}
+        />
+      )}
     </header>
   )
 }
