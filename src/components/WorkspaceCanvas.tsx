@@ -174,7 +174,7 @@ export default function WorkspaceCanvas({
 
     {/* ── Status bar ── */}
     <div className="h-7 shrink-0 bg-[#0e1017] border-t border-white/5 flex items-center px-4 gap-2 select-none">
-      <span className="text-[10px] text-gray-600 font-mono">Paralives Mod Studio v0.0.0</span>
+      <span className="text-[10px] text-gray-600 font-mono">Paralives Mod Studio v{__APP_VERSION__}</span>
       {project && (
         <>
           <span className="text-gray-700 text-[10px]">•</span>
