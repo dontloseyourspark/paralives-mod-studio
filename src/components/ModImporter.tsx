@@ -333,7 +333,31 @@ export default function ModImporter({ onImportComplete, triggerRef }: ModImporte
       return itemsList
     }
 
-    const parsePrefabGraph = (text: string): ComponentNode[] => {
+    // parsePrefabValue — parse a scalar property value from a .prefab line.
+    //
+    // The key insight: Paralives GUIDs are 64-bit unsigned integers stored as
+    // decimal strings (up to 19 digits). JavaScript's Number type has only
+    // 15–16 significant decimal digits, so parseFloat on a 19-digit GUID
+    // silently corrupts the last 3–4 digits — e.g.:
+    //   "7631569798772361429"  →  parseFloat  →  7631569798772361000  (wrong)
+    //
+    // Rule: if the value is a pure integer string with > 15 digits, keep it
+    // as a string. Vectors, small integers, and floats parse normally.
+    // Non-numeric strings (e.g. 'True', 'False', 'None', 'bool3(...)') are
+    // returned as-is regardless.
+    const parsePrefabValue = (raw: string): PrefabPropertyValue => {
+      // Pure integer string with > 15 digits → GUID, keep as string
+      if (/^\d{16,}$/.test(raw)) return raw
+      // Negative integer with > 15 digits (rare but safe)
+      if (/^-\d{16,}$/.test(raw)) return raw
+      // Number (integer or float with ≤ 15 digits)
+      const n = Number(raw)
+      if (!isNaN(n) && raw.trim() !== '') return n
+      // Anything else (strings, 'True', 'False', 'bool3(...)', etc.)
+      return raw
+    }
+
+        const parsePrefabGraph = (text: string): ComponentNode[] => {
       const lines = text.split('\n')
       const components: ComponentNode[] = []
       let currentNodeGuid = ''
@@ -435,7 +459,7 @@ export default function ModImporter({ onImportComplete, triggerRef }: ModImporte
           if (pValue === '') currentComponent.properties[pKey] = null
           else if (pValue.startsWith('(') && pValue.endsWith(')'))
             currentComponent.properties[pKey] = pValue.replace(/[()]/g, '').split(',').map(n => parseFloat(n.trim()) || 0)
-          else currentComponent.properties[pKey] = isNaN(Number(pValue)) ? pValue : parseFloat(pValue)
+          else currentComponent.properties[pKey] = parsePrefabValue(pValue)
           continue
         }
 
@@ -461,7 +485,7 @@ export default function ModImporter({ onImportComplete, triggerRef }: ModImporte
           currentComponent.properties[lastIndent1Key] = bag
           if (pValue.startsWith('(') && pValue.endsWith(')'))
             bag[pKey] = pValue.replace(/[()]/g, '').split(',').map(n => parseFloat(n.trim()) || 0)
-          else bag[pKey] = isNaN(Number(pValue)) ? pValue : parseFloat(pValue)
+          else bag[pKey] = parsePrefabValue(pValue)
           continue
         }
 

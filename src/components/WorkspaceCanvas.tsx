@@ -1,6 +1,5 @@
 // src/components/WorkspaceCanvas.tsx
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { Plus, Trash } from 'phosphor-react'
 import { useModStore } from '../store/useModStore'
 import ItemsPanel from './ItemsPanel'
 import ItemEditorPanel from './ItemEditorPanel'
@@ -19,14 +18,17 @@ interface WorkspaceCanvasProps {
   onSelectItem: (item: Item) => void
   onSelectNode: (node: ComponentNode) => void
   onAddItem: () => void
+  onClearNode: () => void
+  onAddChildNode: (item: Item) => void
+  onRemoveChildNode: (item: Item, nodeGuid: string) => void
   onDeleteItem: (itemId: string) => void
   onSaveItem: (updatedItem: Item) => void
   onWizardAdvancedEditing: (partial: Partial<Item> | TranslationWizardPayload) => void
   onProjectChange: (updated: ModProject) => void
 }
 
-const MIN_EDITOR_WIDTH = 320   // px — editor panel minimum
-const MIN_VIEWPORT_WIDTH = 200 // px — viewport minimum
+const MIN_EDITOR_WIDTH = 320
+const MIN_VIEWPORT_WIDTH = 200
 
 export default function WorkspaceCanvas({
   project,
@@ -37,6 +39,10 @@ export default function WorkspaceCanvas({
   activeSelectedNode,
   onSelectItem,
   onSelectNode,
+  onAddItem,
+  onClearNode,
+  onAddChildNode,
+  onRemoveChildNode,
   onDeleteItem,
   onSaveItem,
   onWizardAdvancedEditing,
@@ -55,28 +61,19 @@ export default function WorkspaceCanvas({
   const modType = project?.modType ?? (items.length > 0 ? 'item' : 'translation')
   const showItemsPanel = modType === 'item' || modType === 'surface'
   const showTranslationEditor = modType === 'translation'
-  const showViewport = showItemsPanel  // 3D viewport only for item mods
+  const showViewport = showItemsPanel
 
   const coverThumbnailUrl = project?.coverThumbnailKey
     ? stringUrlCache[project.coverThumbnailKey] ?? localStorage.getItem(`asset_fallback_${project.coverThumbnailKey}`)
     : null
 
-  // Measures the actual cover image and warns if it isn't exactly 1020×1020.
-  // measuredOversized only matters when there's a cover at all — when there
-  // isn't, coverThumbnailWarning below masks it regardless of stale state.
   const [measuredOversized, setMeasuredOversized] = useState(false)
   useEffect(() => {
     if (!coverThumbnailUrl) return
     let cancelled = false
     const img = new Image()
-    img.onload = () => {
-      if (cancelled) return
-      setMeasuredOversized(img.naturalWidth !== 1020 || img.naturalHeight !== 1020)
-    }
-    img.onerror = () => {
-      if (cancelled) return
-      setMeasuredOversized(false)
-    }
+    img.onload = () => { if (!cancelled) setMeasuredOversized(img.naturalWidth !== 1020 || img.naturalHeight !== 1020) }
+    img.onerror = () => { if (!cancelled) setMeasuredOversized(false) }
     img.src = coverThumbnailUrl
     return () => { cancelled = true }
   }, [coverThumbnailUrl])
@@ -89,36 +86,28 @@ export default function WorkspaceCanvas({
     onProjectChange({ ...project, coverThumbnailKey: key })
   }
 
-  // ── Resizable divider ──────────────────────────────────────────────────────
   const handleDividerMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
     isDragging.current = true
-
     const onMove = (ev: MouseEvent) => {
       if (!isDragging.current || !containerRef.current) return
       const containerRect = containerRef.current.getBoundingClientRect()
-      // Viewport width = distance from right edge of container to mouse
       const newViewportWidth = containerRect.right - ev.clientX
-      setViewportWidth(Math.max(MIN_VIEWPORT_WIDTH, Math.min(
-        newViewportWidth,
-        containerRect.width - MIN_EDITOR_WIDTH
-      )))
+      setViewportWidth(Math.max(MIN_VIEWPORT_WIDTH, Math.min(newViewportWidth, containerRect.width - MIN_EDITOR_WIDTH)))
     }
-
     const onUp = () => {
       isDragging.current = false
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
     }
-
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
   }, [])
 
   return (
+    <div className="flex-1 flex flex-col min-h-0">
     <div className="flex-1 flex min-h-0 relative">
 
-      {/* ── Items sidebar ── */}
       {showItemsPanel && (
         <div className="relative h-full flex flex-col shrink-0">
           <ItemsPanel
@@ -127,37 +116,18 @@ export default function WorkspaceCanvas({
             selectedNodeKey={selectedNodeKey}
             onSelectItem={onSelectItem}
             onSelectNode={onSelectNode}
+            onAddItem={onAddItem}
+            onAddChildNode={onAddChildNode}
+            onRemoveChildNode={onRemoveChildNode}
             coverThumbnailUrl={coverThumbnailUrl}
             coverThumbnailWarning={coverThumbnailWarning}
             onCoverUpload={handleCoverUpload}
           />
 
-          <div className="absolute bottom-3 left-3 right-3 flex gap-2 select-none">
-            <button
-              onClick={() => setWizardOpen(true)}
-              className="flex-1 flex items-center justify-center gap-1 py-2 text-[11px] font-bold uppercase tracking-wider bg-white/5 hover:bg-white/10 rounded-xl cursor-pointer text-gray-300 hover:text-white border border-white/5 transition-all outline-none"
-            >
-              <Plus size={12} weight="bold" className="text-[#8b5cf6]" />
-              <span>Add Item</span>
-            </button>
-
-            {activeSelectedItem && (
-              <button
-                onClick={() => onDeleteItem(activeSelectedItem.id)}
-                className="p-2 bg-rose-950/20 hover:bg-rose-950/60 text-rose-400 rounded-xl cursor-pointer border border-rose-500/10 hover:border-rose-500/30 transition-all outline-none"
-                title="Delete selected item"
-              >
-                <Trash size={14} />
-              </button>
-            )}
-          </div>
         </div>
       )}
 
-      {/* ── Main area: editor + divider + viewport ── */}
       <div ref={containerRef} className="flex-1 flex h-full min-w-0">
-
-        {/* Editor panel */}
         <main className="flex-1 h-full min-w-0 bg-[#0e1017] overflow-hidden">
           {showTranslationEditor ? (
             <TranslationEditorPanel />
@@ -167,29 +137,25 @@ export default function WorkspaceCanvas({
               item={activeSelectedItem}
               activeNode={activeSelectedNode}
               onSave={onSaveItem}
+              onDeleteItem={onDeleteItem}
+              onRemoveChildNode={onRemoveChildNode}
+              onClearNode={onClearNode}
             />
           )}
         </main>
 
-        {/* Resizable divider + viewport — item mods only */}
         {showViewport && (
           <>
-            {/* Drag handle */}
             <div
               onMouseDown={handleDividerMouseDown}
               className="w-1 h-full bg-white/5 hover:bg-[#8b5cf6]/40 active:bg-[#8b5cf6]/60 cursor-col-resize transition-colors shrink-0 select-none"
               title="Drag to resize"
             />
-
-            {/* 3D Viewport */}
-            <div
-              className="h-full shrink-0 overflow-hidden"
-              style={{ width: viewportWidth }}
-            >
+            <div className="h-full shrink-0 overflow-hidden" style={{ width: viewportWidth }}>
               <MeshViewport
-              meshKeys={activeSelectedItem?.meshKeys ?? {}}
-              activeNode={activeSelectedNode}
-              item={activeSelectedItem}
+                meshKeys={activeSelectedItem?.meshKeys ?? {}}
+                activeNode={activeSelectedNode}
+                item={activeSelectedItem}
               />
             </div>
           </>
@@ -205,5 +171,20 @@ export default function WorkspaceCanvas({
         }}
       />
     </div>
+
+    {/* ── Status bar ── */}
+    <div className="h-7 shrink-0 bg-[#0e1017] border-t border-white/5 flex items-center px-4 gap-2 select-none">
+      <span className="text-[10px] text-gray-600 font-mono">Paralives Mod Studio v0.0.0</span>
+      {project && (
+        <>
+          <span className="text-gray-700 text-[10px]">•</span>
+          <span className="text-[10px] text-gray-500 font-medium truncate">{project.name}</span>
+          <span className="text-gray-700 text-[10px]">·</span>
+          <span className="text-[10px] text-gray-600">{items.length} {items.length === 1 ? 'item' : 'items'}</span>
+        </>
+      )}
+    </div>
+    </div>
   )
 }
+

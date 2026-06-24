@@ -5,6 +5,9 @@ import {
   Download, Sliders, Eye, File, PaintBucket, Translate
 } from 'phosphor-react'
 import { useModStore } from '../store/useModStore'
+import { assetDb } from '../utils/assetDb'
+import { itemTextureCacheKey, ITEM_MESH_TEXTURE_SLOTS } from '../lib/itemTextureSlots'
+import { makeDefaultComponents, makeTextureGuidMap } from '../lib/defaultComponents'
 import type { Item } from '../types/types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -223,34 +226,82 @@ export default function CreateModWizard({ isOpen, onClose, onComplete, onAdvance
   }
 
   // ── Build item from wizard state ───────────────────────────────────────────
+  //
+  // Async because we need to persist the FBX and textures to assetDb before
+  // handing the item off to the store. The FBX is stored via saveFileRaw under
+  // mesh_{assetGuid}; textures are stored under item_tex_{itemGuid}_{slot}
+  // with the first texture → DetailMap, second → ColorZoneMap, etc.
+  // The user can reassign slots in the Textures tab afterwards.
 
-  const buildPartialItem = (): Partial<Item> => {
-    const textureKeys: Record<string, string> = {}
-    state.textureFiles.forEach((f) => {
-      const key = `texture_${crypto.randomUUID()}`
-      registerFileInCache(key, f)
-      textureKeys[key] = f.name
-    })
+  const buildItem = async (): Promise<Partial<Item>> => {
+    const itemId   = crypto.randomUUID()
+    // item.guid is a stable 19-digit numeric string — derive from UUID digits
+    const itemGuid = itemId.replace(/-/g, '').replace(/[a-f]/g, (c) =>
+      String(c.charCodeAt(0) - 87)).replace(/[^0-9]/g, '1').substring(0, 19).padEnd(19, '0')
+    const meshKeys: Record<string, string> = {}
+
+    // Store FBX — generate a stable numeric-style GUID from a UUID
+    let fbxAssetGuid: string | null = null
+    if (state.meshFile) {
+      fbxAssetGuid = crypto.randomUUID()
+        .replace(/-/g, '')
+        .replace(/[a-f]/g, (c) => String(c.charCodeAt(0) - 87))
+        .replace(/[^0-9]/g, '1')
+        .substring(0, 19)
+        .padEnd(19, '0')
+      const cacheKey = `mesh_${fbxAssetGuid}`
+      await assetDb.saveFileRaw(cacheKey, state.meshFile)
+      meshKeys[fbxAssetGuid] = cacheKey
+    }
+
+    // Store textures under item_tex_{itemGuid}_{slot} — first file → DetailMap, etc.
+    // Track the asset GUID for each slot so makeDefaultComponents can bind them.
+    const textureAssetGuids: string[] = []
+    for (let i = 0; i < state.textureFiles.length; i++) {
+      const slot = ITEM_MESH_TEXTURE_SLOTS[i]
+      if (!slot) break
+      // Generate a stable numeric asset GUID for this texture
+      const texAssetGuid = crypto.randomUUID()
+        .replace(/-/g, '')
+        .replace(/[a-f]/g, (c) => String(c.charCodeAt(0) - 87))
+        .replace(/[^0-9]/g, '1')
+        .substring(0, 19)
+        .padEnd(19, '0')
+      textureAssetGuids.push(texAssetGuid)
+      const cacheKey = itemTextureCacheKey(itemGuid, slot)
+      await assetDb.saveFileRaw(cacheKey, state.textureFiles[i])
+      // Also register in the in-memory cache so the Textures tab preview works immediately
+      await registerFileInCache(cacheKey, state.textureFiles[i])
+    }
+
+    // Build the prefab component scaffold so the node accordion and viewport work immediately
+    const textureGuidMap = makeTextureGuidMap(textureAssetGuids)
+    const components = makeDefaultComponents(itemGuid, fbxAssetGuid, textureGuidMap)
+
+    // Stable prefab GUID — same derivation as getPrefabGuid in itemModExporter
+    const prefabGuid = itemGuid.substring(0, 18) + '1'
 
     return {
-      id:   crypto.randomUUID(),
-      guid: crypto.randomUUID(),
+      id:   itemId,
+      guid: itemGuid,
       name: state.modName.trim() || 'New Mod Item',
       description: state.modType === 'wall_paint'
         ? 'Custom wall paint or wallpaper pattern.'
         : 'Custom placeable furniture item.',
       price: 0,
-      tags: [], 
+      tags: [],
       thumbnailKey: null,
-      textureKeys,
+      prefabGuid,
+      meshKeys,
+      textureKeys: {},  // legacy field — textures now live in assetDb under item_tex_ keys
       componentBlueprints: { rootDefaultStates: [], materialSurfaces: [] },
-      components: [],
+      components,
     }
   }
 
   // ── Finish actions ─────────────────────────────────────────────────────────
 
-  const handleDownload = () => {
+  const handleDownload = async () => {
     if (state.modType === 'translation') {
       const translationText = "#Setting.Translations\n =Items\n"
       const blob = new Blob([translationText], { type: 'text/plain' })
@@ -264,7 +315,7 @@ export default function CreateModWizard({ isOpen, onClose, onComplete, onAdvance
       return
     }
 
-    const item = buildPartialItem() as Item
+    const item = await buildItem() as Item
     addItemWith(item)
     const blob = new Blob([JSON.stringify(item, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
@@ -277,7 +328,7 @@ export default function CreateModWizard({ isOpen, onClose, onComplete, onAdvance
     handleClose()
   }
 
-  const handleAdvancedEditing = () => {
+  const handleAdvancedEditing = async () => {
     if (state.modType === 'translation') {
       // Pass a special payload so the parent (Dashboard) can create the project & navigate
       onAdvancedEditing?.({
@@ -288,7 +339,7 @@ export default function CreateModWizard({ isOpen, onClose, onComplete, onAdvance
       return
     }
 
-    const partial = buildPartialItem()
+    const partial = await buildItem()
     onAdvancedEditing?.(partial)
     handleClose()
   }

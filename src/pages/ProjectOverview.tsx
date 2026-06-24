@@ -2,22 +2,6 @@ import { useProjectWorkspace } from '../hooks/useProjectWorkspace'
 import WorkspaceHeader from '../components/WorkspaceHeader'
 import WorkspaceCanvas from '../components/WorkspaceCanvas'
 
-/**
- * Project editor route component.
- *
- * This file is intentionally a thin composition layer. It:
- *   1. Calls useProjectWorkspace() to get all state and handlers
- *   2. Renders loading / empty fallback screens
- *   3. Passes everything down to WorkspaceHeader and WorkspaceCanvas
- *
- * ─────────────────────────────────────────────────────────────────
- * RULE: No business logic belongs here.
- *   - To change what "Add Item" does → edit useProjectWorkspace.ts
- *   - To change the header bar layout → edit WorkspaceHeader.tsx
- *   - To change the canvas / panel layout → edit WorkspaceCanvas.tsx
- *   - To change the wizard flow → edit CreateModWizard.tsx
- * ─────────────────────────────────────────────────────────────────
- */
 export default function ProjectOverview() {
   const {
     currentProject,
@@ -28,11 +12,19 @@ export default function ProjectOverview() {
     isSaving,
     isRehydrating,
     hasUnsavedChanges,
+    canUndo,
+    canRedo,
+    handleUndo,
+    handleRedo,
     updateProject,
     updateItem,
+    handleAddNewItem,
+    handleAddChildNode,
+    handleRemoveChildNode,
     handleDeleteItem,
     handleSelectItem,
     handleSelectNode,
+    handleClearNode,
     handleWizardAdvancedEditing,
     handleSaveProject,
     handleBackToDashboard,
@@ -66,6 +58,10 @@ export default function ProjectOverview() {
         project={currentProject}
         isSaving={isSaving}
         hasUnsavedChanges={hasUnsavedChanges}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
         onBack={handleBackToDashboard}
         onSave={handleSaveProject}
         onProjectChange={updateProject}
@@ -80,7 +76,10 @@ export default function ProjectOverview() {
         activeSelectedNode={activeSelectedNode}
         onSelectItem={handleSelectItem}
         onSelectNode={handleSelectNode}
-        onAddItem={() => {}}
+        onClearNode={handleClearNode}
+        onAddItem={handleAddNewItem}
+        onAddChildNode={handleAddChildNode}
+        onRemoveChildNode={handleRemoveChildNode}
         onDeleteItem={handleDeleteItem}
         onSaveItem={updateItem}
         onWizardAdvancedEditing={handleWizardAdvancedEditing}

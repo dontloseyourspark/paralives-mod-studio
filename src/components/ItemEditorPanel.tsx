@@ -1,7 +1,7 @@
 // src/components/ItemEditorPanel.tsx
 import React, { useState, useRef } from 'react'
 import {
-  PencilSimple, Image, Cube,
+  PencilSimple, Image, Cube, ArrowLeft, Trash,
   Palette, UploadSimple, X, CheckCircle, Warning, TreeStructure, Copy
 } from 'phosphor-react'
 import { useModStore } from '../store/useModStore'
@@ -13,23 +13,18 @@ interface ItemEditorPanelProps {
   item: Item | null
   activeNode: ComponentNode | null
   onSave: (updatedItem: Item) => void
+  onClearNode: () => void
+  onDeleteItem?: (itemId: string) => void
+  onRemoveChildNode?: (item: Item, nodeGuid: string) => void
 }
 
 type NodeTab = 'textures' | 'prefab'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-// A GUID in Paralives is a 15-19 digit numeric string.
-// JS parseFloat loses precision on these, so we detect them by digit count
-// on the *original stored value* (which may already be a number with precision loss).
 function isGuidLike(val: unknown): boolean {
-  if (typeof val === 'number') {
-    // 1e15 ≈ 15 digits — anything this large is almost certainly a GUID
-    return Math.abs(val) >= 1e15
-  }
-  if (typeof val === 'string') {
-    return /^\d{15,19}$/.test(val.trim())
-  }
+  if (typeof val === 'number') return Math.abs(val) >= 1e15
+  if (typeof val === 'string') return /^\d{15,19}$/.test(val.trim())
   return false
 }
 
@@ -42,8 +37,6 @@ function isVector(val: unknown): val is number[] {
 }
 
 // ─── Toggle switch ────────────────────────────────────────────────────────────
-// Hoisted to module scope — defining this inside ItemEditorPanel's render body
-// recreates the component on every render, resetting any internal state.
 
 interface ToggleProps {
   value: boolean
@@ -198,11 +191,10 @@ function NodeTexturePanel({ item, node, onSave }: NodeTexturePanelProps) {
 
 interface BlueprintPanelProps {
   item: Item
-  nodes: ComponentNode[]   // all components sharing this node's id (ItemObjectRoot, ItemCubeTransform, ItemMeshReference, etc.)
+  nodes: ComponentNode[]
   onSave: (updatedItem: Item) => void
 }
 
-// A single editable property row
 interface PropRowProps {
   propKey: string
   value: PrefabPropertyValue
@@ -212,8 +204,6 @@ interface PropRowProps {
 function PropRow({ propKey, value, onChange }: PropRowProps) {
   const inputClass = "bg-white/3 border border-white/8 rounded-lg px-2.5 py-1 text-xs text-white outline-none focus:border-[#8b5cf6]/40 transition-all font-mono"
 
-  // Null, undefined, or unexpected object — read-only dash (should be caught upstream,
-  // but guard here so a missed case never crashes the panel)
   if (value === null || value === undefined || (typeof value === 'object' && !Array.isArray(value))) {
     return (
       <div className="flex items-center justify-between gap-3 py-1.5 border-b border-white/3">
@@ -222,6 +212,7 @@ function PropRow({ propKey, value, onChange }: PropRowProps) {
       </div>
     )
   }
+
   if (isGuidLike(value)) {
     const strVal = String(value)
     return (
@@ -229,11 +220,7 @@ function PropRow({ propKey, value, onChange }: PropRowProps) {
         <span className="text-[11px] text-gray-400 shrink-0 font-medium">{propKey}</span>
         <div className="flex items-center gap-1.5 min-w-0">
           <span className="text-[10px] font-mono text-gray-500 truncate">{strVal}</span>
-          <button
-            onClick={() => navigator.clipboard.writeText(strVal)}
-            className="text-gray-600 hover:text-gray-300 transition-colors shrink-0"
-            title="Copy GUID"
-          >
+          <button onClick={() => navigator.clipboard.writeText(strVal)} className="text-gray-600 hover:text-gray-300 transition-colors shrink-0" title="Copy GUID">
             <Copy size={10} />
           </button>
           <span className="text-[9px] text-gray-700 bg-white/3 px-1.5 py-0.5 rounded shrink-0">GUID</span>
@@ -242,7 +229,6 @@ function PropRow({ propKey, value, onChange }: PropRowProps) {
     )
   }
 
-  // Boolean string → toggle
   if (isBoolString(value)) {
     const isTrue = value === 'True'
     return (
@@ -250,19 +236,14 @@ function PropRow({ propKey, value, onChange }: PropRowProps) {
         <span className="text-[11px] text-gray-400 font-medium">{propKey}</span>
         <button
           onClick={() => onChange(propKey, isTrue ? 'False' : 'True')}
-          className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${
-            isTrue ? 'bg-[#8b5cf6]' : 'bg-white/10'
-          }`}
+          className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${isTrue ? 'bg-[#8b5cf6]' : 'bg-white/10'}`}
         >
-          <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${
-            isTrue ? 'left-[18px]' : 'left-0.5'
-          }`} />
+          <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${isTrue ? 'left-[18px]' : 'left-0.5'}`} />
         </button>
       </div>
     )
   }
 
-  // Vector (number[]) → X/Y/Z number inputs
   if (isVector(value)) {
     const labels = ['X', 'Y', 'Z', 'W']
     return (
@@ -289,7 +270,6 @@ function PropRow({ propKey, value, onChange }: PropRowProps) {
     )
   }
 
-  // Number → number input
   if (typeof value === 'number') {
     return (
       <div className="flex items-center justify-between gap-3 py-1.5 border-b border-white/3">
@@ -304,7 +284,6 @@ function PropRow({ propKey, value, onChange }: PropRowProps) {
     )
   }
 
-  // Special Unity type strings (bool3, etc.) → read-only
   if (typeof value === 'string' && value.startsWith('bool3(')) {
     return (
       <div className="flex items-center justify-between gap-3 py-1.5 border-b border-white/3">
@@ -314,7 +293,6 @@ function PropRow({ propKey, value, onChange }: PropRowProps) {
     )
   }
 
-  // Generic string → text input
   if (typeof value === 'string') {
     return (
       <div className="flex items-center justify-between gap-3 py-1.5 border-b border-white/3">
@@ -329,7 +307,6 @@ function PropRow({ propKey, value, onChange }: PropRowProps) {
     )
   }
 
-  // Null / undefined / unknown → read-only dash
   return (
     <div className="flex items-center justify-between gap-3 py-1.5 border-b border-white/3">
       <span className="text-[11px] text-gray-400 font-medium">{propKey}</span>
@@ -378,7 +355,6 @@ function ComponentSection({ item, node, defaultOpen = true, onSave }: ComponentS
 
   return (
     <div className="border border-white/5 rounded-xl overflow-hidden mb-2">
-      {/* Section header */}
       <button
         onClick={() => setOpen(o => !o)}
         className="w-full flex items-center justify-between px-3 py-2.5 bg-white/2 hover:bg-white/4 transition-colors text-left"
@@ -390,14 +366,12 @@ function ComponentSection({ item, node, defaultOpen = true, onSave }: ComponentS
         </div>
       </button>
 
-      {/* Properties */}
       {open && (
         <div className="px-3 pb-2 pt-1">
           {propEntries.length === 0 ? (
             <span className="text-[11px] text-gray-600 italic py-2 block">No properties</span>
           ) : (
             propEntries.map(([key, val]) => {
-              // Nested sub-property object: { _value?: ..., SubKey: ... }
               if (typeof val === 'object' && val !== null && !Array.isArray(val)) {
                 const { _value, ...subProps } = val as Record<string, PrefabPropertyValue | undefined>
                 return (
@@ -411,13 +385,9 @@ function ComponentSection({ item, node, defaultOpen = true, onSave }: ComponentS
                               ...(val as Record<string, PrefabPropertyValue | undefined>),
                               _value: _value === 'True' ? 'False' : 'True'
                             })}
-                            className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${
-                              _value === 'True' ? 'bg-[#8b5cf6]' : 'bg-white/10'
-                            }`}
+                            className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${_value === 'True' ? 'bg-[#8b5cf6]' : 'bg-white/10'}`}
                           >
-                            <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${
-                              _value === 'True' ? 'left-[18px]' : 'left-0.5'
-                            }`} />
+                            <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${_value === 'True' ? 'left-[18px]' : 'left-0.5'}`} />
                           </button>
                         ) : (
                           <span className="text-[10px] font-mono text-gray-500">{String(_value)}</span>
@@ -426,19 +396,13 @@ function ComponentSection({ item, node, defaultOpen = true, onSave }: ComponentS
                     </div>
                     <div className="pl-4 border-l border-white/5 ml-2">
                       {Object.entries(subProps).map(([subKey, subVal]) => (
-                        <PropRow
-                          key={subKey}
-                          propKey={subKey}
-                          value={subVal ?? null}
-                          onChange={(k, v) => handleSubChange(key, k, v)}
-                        />
+                        <PropRow key={subKey} propKey={subKey} value={subVal ?? null} onChange={(k, v) => handleSubChange(key, k, v)} />
                       ))}
                     </div>
                   </div>
                 )
               }
 
-              // Null placeholder (registry sub-block opener)
               if (val === null) {
                 return (
                   <div key={key} className="flex items-center justify-between gap-3 py-1.5 border-b border-white/3">
@@ -470,13 +434,7 @@ function BlueprintPanel({ item, nodes, onSave }: BlueprintPanelProps) {
   return (
     <div className="flex flex-col gap-0">
       {nodes.map((node) => (
-        <ComponentSection
-          key={`${node.id}_${node.type}`}
-          item={item}
-          node={node}
-          defaultOpen={true}
-          onSave={onSave}
-        />
+        <ComponentSection key={`${node.id}_${node.type}`} item={item} node={node} defaultOpen={true} onSave={onSave} />
       ))}
     </div>
   )
@@ -495,8 +453,6 @@ function NodeSection({ item, node, onSave }: NodeSectionProps) {
   const isRoot = node.childIndex === undefined
   const label = isRoot ? 'Root' : `Child ${node.childIndex}`
 
-  // All components that belong to this node (share the same ItemObject GUID)
-  // Ordered: ItemObjectRoot first, then others alphabetically, ItemMeshReference last
   const nodeComponents = item.components
     .filter(c => c.id === node.id)
     .sort((a, b) => {
@@ -509,14 +465,11 @@ function NodeSection({ item, node, onSave }: NodeSectionProps) {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Tabs on left, node identity on right */}
       <div className="flex items-center gap-1 mb-3 pb-3 border-b border-white/5">
         <button
           onClick={() => setTab('prefab')}
           className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all ${
-            tab === 'prefab'
-              ? 'bg-[#8b5cf6]/15 text-[#a78bfa]'
-              : 'text-gray-500 hover:text-gray-300 hover:bg-white/3'
+            tab === 'prefab' ? 'bg-[#8b5cf6]/15 text-[#a78bfa]' : 'text-gray-500 hover:text-gray-300 hover:bg-white/3'
           }`}
         >
           <TreeStructure size={11} />
@@ -525,9 +478,7 @@ function NodeSection({ item, node, onSave }: NodeSectionProps) {
         <button
           onClick={() => setTab('textures')}
           className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all ${
-            tab === 'textures'
-              ? 'bg-[#8b5cf6]/15 text-[#a78bfa]'
-              : 'text-gray-500 hover:text-gray-300 hover:bg-white/3'
+            tab === 'textures' ? 'bg-[#8b5cf6]/15 text-[#a78bfa]' : 'text-gray-500 hover:text-gray-300 hover:bg-white/3'
           }`}
         >
           <Palette size={11} />
@@ -540,7 +491,6 @@ function NodeSection({ item, node, onSave }: NodeSectionProps) {
         </div>
       </div>
 
-      {/* Tab content */}
       <div className="flex-1 overflow-y-auto min-h-0">
         {tab === 'textures' && <NodeTexturePanel item={item} node={node} onSave={onSave} />}
         {tab === 'prefab' && <BlueprintPanel item={item} nodes={nodeComponents} onSave={onSave} />}
@@ -551,10 +501,45 @@ function NodeSection({ item, node, onSave }: NodeSectionProps) {
 
 // ─── Main panel ───────────────────────────────────────────────────────────────
 
-export default function ItemEditorPanel({ item, activeNode, onSave }: ItemEditorPanelProps) {
+// ── Delete item button (two-step confirm) ─────────────────────────────────────
+function DeleteItemButton({ onDelete, label = 'Delete Item' }: { onDelete: () => void; label?: string }) {
+  const [confirming, setConfirming] = useState(false)
+
+  if (confirming) {
+    return (
+      <div className="flex items-center gap-2 px-5 pb-5 shrink-0">
+        <span className="text-[11px] text-gray-400 flex-1">Delete this item?</span>
+        <button
+          onClick={() => { onDelete(); setConfirming(false) }}
+          className="px-3 py-1.5 bg-rose-600/80 hover:bg-rose-600 text-white rounded-lg text-[11px] font-bold cursor-pointer transition-colors outline-none"
+        >
+          Delete
+        </button>
+        <button
+          onClick={() => setConfirming(false)}
+          className="px-3 py-1.5 bg-white/5 hover:bg-white/10 text-gray-400 rounded-lg text-[11px] cursor-pointer transition-colors outline-none"
+        >
+          Cancel
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="px-5 pb-5 shrink-0">
+      <button
+        onClick={() => setConfirming(true)}
+        className="w-full flex items-center justify-center gap-2 py-2 rounded-xl text-[11px] font-semibold text-rose-400/60 hover:text-rose-400 hover:bg-rose-400/5 border border-rose-500/10 hover:border-rose-500/20 transition-all outline-none"
+      >
+        <Trash size={12} />
+        {label}
+      </button>
+    </div>
+  )
+}
+
+export default function ItemEditorPanel({ item, activeNode, onSave, onClearNode, onDeleteItem, onRemoveChildNode }: ItemEditorPanelProps) {
   const getBlobUrlFromCache = useModStore((state) => state.getBlobUrlFromCache)
-  // WorkspaceCanvas mounts this with key={activeSelectedItem?.id}, so a fresh
-  // instance (and fresh initial state below) is guaranteed whenever item changes.
   const [name, setName] = useState(item?.name || '')
   const [price, setPrice] = useState<number>(item?.price ?? 0)
   const [description, setDescription] = useState(item?.description || '')
@@ -569,7 +554,6 @@ export default function ItemEditorPanel({ item, activeNode, onSave }: ItemEditor
   }
 
   const liveThumbnailUrl = getBlobUrlFromCache(item.thumbnailKey ?? null)
-
   const save = (patch: Partial<Item>) => onSave({ ...item, ...patch })
 
   const handleThumbnailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -588,13 +572,12 @@ export default function ItemEditorPanel({ item, activeNode, onSave }: ItemEditor
   const rowClass = "flex items-center justify-between gap-3 py-2 border-b border-white/3 last:border-0"
   const groupLabelClass = "text-[10px] font-semibold uppercase tracking-widest text-gray-600 mt-4 mb-1.5 first:mt-0"
 
-  // ── Level 0: single scrollable item view ────────────────────────────────────
+  // ── Level 0: item fields ───────────────────────────────────────────────────
   if (!activeNode) {
     return (
       <div className="h-full flex flex-col bg-transparent text-white select-none box-border">
         <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-4 min-h-0">
 
-          {/* ── Identity ── */}
           <div className="flex flex-col md:flex-row gap-5 bg-[#161923] border border-white/5 rounded-2xl p-5 shrink-0">
             <div className="flex flex-col gap-2 shrink-0 items-center">
               <span className={labelClass}>Catalog Image</span>
@@ -650,7 +633,6 @@ export default function ItemEditorPanel({ item, activeNode, onSave }: ItemEditor
             </div>
           </div>
 
-          {/* ── Description ── */}
           <div className="flex flex-col gap-2 bg-[#161923] border border-white/5 rounded-2xl p-5 shrink-0">
             <label className={labelClass}>Catalog Description</label>
             <textarea className="w-full bg-white/3 border border-white/5 rounded-xl px-4 py-3 text-sm text-gray-300 placeholder-gray-600 outline-none focus:border-[#8b5cf6]/40 transition-all min-h-[70px] resize-vertical leading-relaxed"
@@ -659,7 +641,6 @@ export default function ItemEditorPanel({ item, activeNode, onSave }: ItemEditor
               placeholder="Add a description..." />
           </div>
 
-          {/* ── Swatch ── */}
           <div className="bg-[#161923] border border-white/5 rounded-2xl p-5 shrink-0">
             <p className={groupLabelClass}>Swatch</p>
             <div className={rowClass}>
@@ -697,7 +678,6 @@ export default function ItemEditorPanel({ item, activeNode, onSave }: ItemEditor
             </div>
           </div>
 
-          {/* ── Placement ── */}
           <div className="bg-[#161923] border border-white/5 rounded-2xl p-5 shrink-0">
             <p className={groupLabelClass}>Placement</p>
             <div className={rowClass}>
@@ -731,7 +711,6 @@ export default function ItemEditorPanel({ item, activeNode, onSave }: ItemEditor
             </div>
           </div>
 
-          {/* ── Rendering ── */}
           <div className="bg-[#161923] border border-white/5 rounded-2xl p-5 shrink-0">
             <p className={groupLabelClass}>Rendering</p>
             {([
@@ -747,7 +726,6 @@ export default function ItemEditorPanel({ item, activeNode, onSave }: ItemEditor
             ))}
           </div>
 
-          {/* ── Behaviour ── */}
           <div className="bg-[#161923] border border-white/5 rounded-2xl p-5 shrink-0">
             <p className={groupLabelClass}>Animation</p>
             <div className={rowClass}>
@@ -774,7 +752,6 @@ export default function ItemEditorPanel({ item, activeNode, onSave }: ItemEditor
             </div>
           </div>
 
-          {/* ── Variants ── */}
           <div className="bg-[#161923] border border-white/5 rounded-2xl p-5 shrink-0">
             <p className={groupLabelClass}>Variants in UI</p>
             {item.itemVariants && item.itemVariants.length > 0 ? (
@@ -783,8 +760,7 @@ export default function ItemEditorPanel({ item, activeNode, onSave }: ItemEditor
                   <div key={v.guid || i} className="flex items-center gap-2 px-3 py-2 bg-white/2 border border-white/5 rounded-lg">
                     <span className="text-[10px] text-gray-500 font-mono shrink-0">Variant {i}</span>
                     <span className="text-[10px] font-mono text-gray-400 truncate flex-1">{v.itemVariantGuid}</span>
-                    <button onClick={() => navigator.clipboard.writeText(v.itemVariantGuid)}
-                      className="text-gray-700 hover:text-gray-400 transition-colors shrink-0">
+                    <button onClick={() => navigator.clipboard.writeText(v.itemVariantGuid)} className="text-gray-700 hover:text-gray-400 transition-colors shrink-0">
                       <Copy size={10} />
                     </button>
                   </div>
@@ -805,7 +781,6 @@ export default function ItemEditorPanel({ item, activeNode, onSave }: ItemEditor
             ))}
           </div>
 
-          {/* ── Collectability / Patreon ── */}
           <div className="bg-[#161923] border border-white/5 rounded-2xl p-5 shrink-0">
             <p className={groupLabelClass}>Collectability</p>
             <div className={rowClass}>
@@ -821,19 +796,90 @@ export default function ItemEditorPanel({ item, activeNode, onSave }: ItemEditor
             </div>
           </div>
 
+          {/* ── Delete item ── */}
+          {onDeleteItem && (
+            <DeleteItemButton onDelete={() => onDeleteItem(item.id)} />
+          )}
+
         </div>
       </div>
     )
   }
 
   // ── Level 1+: node-level view (Prefab + Textures tabs) ──────────────────────
+  const isRootNode = activeNode.childIndex === undefined
+  const nodeLabel = isRootNode ? 'Root' : `Child ${activeNode.childIndex}`
+
   return (
     <div className="h-full flex flex-col bg-transparent text-white select-none box-border">
-      <div className="flex-1 p-6 flex flex-col min-h-0">
+      {/* Breadcrumb — click item name to return to Level 0 */}
+      <div className="flex items-center gap-2 px-6 pt-4 shrink-0">
+        <button
+          onClick={onClearNode}
+          className="flex items-center gap-1.5 text-[11px] text-gray-500 hover:text-white transition-colors group"
+        >
+          <ArrowLeft size={11} weight="bold" className="group-hover:-translate-x-0.5 transition-transform" />
+          <span className="font-medium truncate max-w-[120px]">{item.name || 'Item'}</span>
+        </button>
+        <span className="text-gray-700 text-[11px]">/</span>
+        <span className="text-[11px] text-gray-400 font-medium">{nodeLabel}</span>
+      </div>
+      <div className="flex-1 p-6 pb-0 flex flex-col min-h-0">
         <div className="bg-[#161923]/20 border border-white/5 rounded-xl p-4 flex-1 flex flex-col min-h-0">
           <NodeSection item={item} node={activeNode} onSave={onSave} />
         </div>
       </div>
+
+      {/* Node-level actions */}
+      {isRootNode ? (
+        /* Root node — delete root = delete item */
+        onDeleteItem && <DeleteItemButton onDelete={() => onDeleteItem(item.id)} label="Delete Item" />
+      ) : (
+        /* Child node — remove this node from the prefab graph */
+        onRemoveChildNode && (
+          <RemoveNodeButton
+            label={nodeLabel}
+            onRemove={() => { onRemoveChildNode(item, activeNode.id); onClearNode() }}
+          />
+        )
+      )}
+    </div>
+  )
+}
+
+// ── Remove node button (two-step confirm) ─────────────────────────────────────
+function RemoveNodeButton({ label, onRemove }: { label: string; onRemove: () => void }) {
+  const [confirming, setConfirming] = useState(false)
+
+  if (confirming) {
+    return (
+      <div className="flex items-center gap-2 px-5 py-3 shrink-0 border-t border-white/5">
+        <span className="text-[11px] text-gray-400 flex-1">Remove {label}?</span>
+        <button
+          onClick={onRemove}
+          className="px-3 py-1.5 bg-rose-600/80 hover:bg-rose-600 text-white rounded-lg text-[11px] font-bold cursor-pointer transition-colors outline-none"
+        >
+          Remove
+        </button>
+        <button
+          onClick={() => setConfirming(false)}
+          className="px-3 py-1.5 bg-white/5 hover:bg-white/10 text-gray-400 rounded-lg text-[11px] cursor-pointer transition-colors outline-none"
+        >
+          Cancel
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="px-5 py-3 shrink-0 border-t border-white/5">
+      <button
+        onClick={() => setConfirming(true)}
+        className="w-full flex items-center justify-center gap-2 py-2 rounded-xl text-[11px] font-semibold text-rose-400/60 hover:text-rose-400 hover:bg-rose-400/5 border border-rose-500/10 hover:border-rose-500/20 transition-all outline-none"
+      >
+        <Trash size={12} />
+        Remove {label}
+      </button>
     </div>
   )
 }

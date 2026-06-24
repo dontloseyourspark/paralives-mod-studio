@@ -1,6 +1,6 @@
 // src/components/WorkspaceHeader.tsx
 import { useRef, useState } from 'react'
-import { ArrowLeft, FloppyDisk, Image, WarningCircle, Export, Tag } from 'phosphor-react'
+import { ArrowLeft, ArrowCounterClockwise, ArrowClockwise, FloppyDisk, Image, WarningCircle, Export, Tag } from 'phosphor-react'
 import type { ModProject } from '../types/types'
 import { useModStore } from '../store/useModStore'
 import { exportItemMod } from '../lib/itemModExporter'
@@ -10,6 +10,10 @@ interface WorkspaceHeaderProps {
   project: ModProject
   isSaving: boolean
   hasUnsavedChanges: boolean
+  canUndo: boolean
+  canRedo: boolean
+  onUndo: () => void
+  onRedo: () => void
   onBack: () => void
   onSave: () => void
   onProjectChange: (updated: ModProject) => void
@@ -19,6 +23,10 @@ export default function WorkspaceHeader({
   project,
   isSaving,
   hasUnsavedChanges,
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo,
   onBack,
   onSave,
   onProjectChange,
@@ -181,6 +189,26 @@ export default function WorkspaceHeader({
                 <WarningCircle size={14} weight="fill" className="text-amber-400" />
               </span>
             )}
+          </button>
+        </div>
+
+        {/* Undo / Redo — session-only, resets on page refresh */}
+        <div className="flex items-center gap-0.5 border-r border-white/5 pr-5">
+          <button
+            onClick={onUndo}
+            disabled={!canUndo}
+            title="Undo (⌘Z)"
+            className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 disabled:text-gray-700 disabled:cursor-not-allowed transition-colors outline-none"
+          >
+            <ArrowCounterClockwise size={15} weight="bold" />
+          </button>
+          <button
+            onClick={onRedo}
+            disabled={!canRedo}
+            title="Redo (⌘⇧Z)"
+            className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 disabled:text-gray-700 disabled:cursor-not-allowed transition-colors outline-none"
+          >
+            <ArrowClockwise size={15} weight="bold" />
           </button>
         </div>
 
