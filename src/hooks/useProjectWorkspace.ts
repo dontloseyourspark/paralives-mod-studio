@@ -386,6 +386,8 @@ export function useProjectWorkspace() {
 
   const handleSelectItem = (item: Item) => { setSelectedItemId(item.id) }
 
+  const handleDeselectItem = useCallback(() => { setSelectedItemId(null) }, [setSelectedItemId])
+
   const handleSelectNode = useCallback((node: ComponentNode) => {
     setSelectedNodeKey(`${node.id}_${node.type}`)
   }, [])
@@ -428,6 +430,7 @@ export function useProjectWorkspace() {
     handleRemoveChildItem,
     handleDeleteItem,
     handleSelectItem,
+    handleDeselectItem,
     handleSelectNode,
     handleClearNode,
     handleWizardAdvancedEditing,

@@ -354,9 +354,10 @@ export function MeshViewport({ meshKeys, activeNode, item }: MeshViewportProps) 
           return
         }
 
-        // FBX UV coordinates are top-down; Three.js defaults to bottom-up.
-        // flipY = false corrects the vertical flip.
-        texture.flipY = false
+        // FBX/OpenGL UV convention is bottom-up (v=0 at the bottom), while the
+        // <img> this texture was decoded from is stored top-down — so the V axis
+        // needs to be flipped to line up. This is three.js's default
+        // (texture.flipY === true); it must NOT be overridden to false here.
         texture.colorSpace = THREE.SRGBColorSpace
 
         // Store texture on the group so the mode toggle can reference it

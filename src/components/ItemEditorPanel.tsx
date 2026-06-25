@@ -2,7 +2,7 @@
 import React, { useState, useRef } from 'react'
 import {
   PencilSimple, Image, Cube, ArrowLeft, Trash,
-  Palette, UploadSimple, X, CheckCircle, Warning, TreeStructure, Copy
+  Palette, UploadSimple, X, CheckCircle, Warning, TreeStructure, Copy, Info
 } from 'phosphor-react'
 import { useModStore } from '../store/useModStore'
 import { ITEM_MESH_TEXTURE_SLOTS, SLOT_LABELS, CONFIRMED_SLOTS, itemTextureCacheKey } from '../lib/itemTextureSlots'
@@ -19,6 +19,36 @@ interface ItemEditorPanelProps {
 }
 
 type NodeTab = 'textures' | 'prefab'
+type Level0Tab = 'basic' | 'advanced'
+
+const SPECULATIVE_FIELD_NOTE =
+  'Based on a UI mockup, not a real exported mod — not yet read on import or written on export.'
+
+// ─── Field label with optional info / speculative-field affordances ───────────
+
+interface FieldLabelProps {
+  children: React.ReactNode
+  info?: string
+  speculative?: boolean
+}
+
+function FieldLabel({ children, info, speculative }: FieldLabelProps) {
+  return (
+    <span className="text-xs text-gray-400 flex items-center gap-1.5">
+      {children}
+      {speculative && (
+        <span title={SPECULATIVE_FIELD_NOTE}>
+          <Warning size={10} className="text-yellow-500/70" />
+        </span>
+      )}
+      {info && (
+        <span title={info}>
+          <Info size={10} className="text-gray-600 hover:text-gray-400 transition-colors" />
+        </span>
+      )}
+    </span>
+  )
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -543,6 +573,7 @@ export default function ItemEditorPanel({ item, activeNode, onSave, onClearNode,
   const [name, setName] = useState(item?.name || '')
   const [price, setPrice] = useState<number>(item?.price ?? 0)
   const [description, setDescription] = useState(item?.description || '')
+  const [level0Tab, setLevel0Tab] = useState<Level0Tab>('basic')
 
   if (!item) {
     return (
@@ -576,225 +607,307 @@ export default function ItemEditorPanel({ item, activeNode, onSave, onClearNode,
   if (!activeNode) {
     return (
       <div className="h-full flex flex-col bg-transparent text-white select-none box-border">
+        <div className="flex items-center gap-1 px-6 pt-4 pb-3 shrink-0 border-b border-white/5">
+          <button
+            onClick={() => setLevel0Tab('basic')}
+            className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all ${
+              level0Tab === 'basic' ? 'bg-[#8b5cf6]/15 text-[#a78bfa]' : 'text-gray-500 hover:text-gray-300 hover:bg-white/3'
+            }`}
+          >
+            Basic
+          </button>
+          <button
+            onClick={() => setLevel0Tab('advanced')}
+            className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all ${
+              level0Tab === 'advanced' ? 'bg-[#8b5cf6]/15 text-[#a78bfa]' : 'text-gray-500 hover:text-gray-300 hover:bg-white/3'
+            }`}
+          >
+            Advanced
+          </button>
+          <span className="ml-auto text-[11px] text-gray-500 font-medium px-2.5 py-1 bg-white/3 rounded-lg truncate max-w-[160px]">
+            {item.name || 'Item'}
+          </span>
+        </div>
+
         <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-4 min-h-0">
 
-          <div className="flex flex-col md:flex-row gap-5 bg-[#161923] border border-white/5 rounded-2xl p-5 shrink-0">
-            <div className="flex flex-col gap-2 shrink-0 items-center">
-              <span className={labelClass}>Catalog Image</span>
-              <div className="relative w-28 h-28 bg-[#0e1017] border border-white/5 rounded-xl overflow-hidden group flex items-center justify-center shadow-inner">
-                {liveThumbnailUrl
-                  ? <img src={liveThumbnailUrl} alt={name} className="w-full h-full object-contain p-2" />
-                  : <Image size={28} weight="thin" className="text-gray-600" />
-                }
-                <label className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1.5 cursor-pointer text-center p-2">
-                  <PencilSimple size={14} className="text-[#8b5cf6]" />
-                  <span className="text-[10px] font-semibold text-gray-200">Replace</span>
-                  <input type="file" accept="image/png, image/jpeg" className="hidden" onChange={handleThumbnailChange} />
-                </label>
-              </div>
-            </div>
-            <div className="flex-1 flex flex-col gap-3 justify-center">
-              <div className="flex flex-col gap-1.5">
-                <label className={labelClass}>Display Name</label>
-                <input type="text" className={inputClass} value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  onBlur={() => save({ name: name.trim() })}
-                  placeholder="Item display name..." />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="flex flex-col gap-1.5">
-                  <label className={labelClass}>Price ($)</label>
-                  <input type="number" className={inputClass + " [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"}
-                    value={price === 0 ? '' : price}
-                    onChange={(e) => setPrice(parseFloat(e.target.value) || 0)}
-                    onBlur={() => save({ price: Number(price) || 0 })}
-                    placeholder="0" min="0" />
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <label className={labelClass}>Price Multiplier</label>
-                  <input type="number" className={inputClass + " [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"}
-                    value={item.priceMultiplier ?? 1}
-                    onChange={(e) => save({ priceMultiplier: parseFloat(e.target.value) || 1 })}
-                    step="0.1" min="0" />
-                </div>
-              </div>
-              <div className={rowClass}>
-                <span className="text-xs text-gray-400">Hide From Catalog</span>
-                <Toggle value={item.hideFromCatalog ?? false} onChange={(v) => save({ hideFromCatalog: v })} />
-              </div>
-              <div className={rowClass}>
-                <span className="text-xs text-gray-400">Override Interaction Group</span>
-                <Toggle value={item.overrideInteractionGroup ?? false} onChange={(v) => save({ overrideInteractionGroup: v })} />
-              </div>
-              <div className={rowClass}>
-                <span className="text-xs text-gray-400">Override Impostor Interactions</span>
-                <Toggle value={item.overrideImpostorInteractions ?? false} onChange={(v) => save({ overrideImpostorInteractions: v })} />
-              </div>
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-2 bg-[#161923] border border-white/5 rounded-2xl p-5 shrink-0">
-            <label className={labelClass}>Catalog Description</label>
-            <textarea className="w-full bg-white/3 border border-white/5 rounded-xl px-4 py-3 text-sm text-gray-300 placeholder-gray-600 outline-none focus:border-[#8b5cf6]/40 transition-all min-h-[70px] resize-vertical leading-relaxed"
-              value={description} onChange={(e) => setDescription(e.target.value)}
-              onBlur={() => save({ description: description.trim() })}
-              placeholder="Add a description..." />
-          </div>
-
-          <div className="bg-[#161923] border border-white/5 rounded-2xl p-5 shrink-0">
-            <p className={groupLabelClass}>Swatch</p>
-            <div className={rowClass}>
-              <span className="text-xs text-gray-400">Has Swatches</span>
-              <Toggle value={item.hasSwatches ?? false} onChange={(v) => save({ hasSwatches: v })} />
-            </div>
-            <div className={rowClass}>
-              <span className="text-xs text-gray-400">Swatch Group GUID</span>
-              <input className={smallInputClass + " w-48"} value={item.swatchGroup ?? ''}
-                onChange={(e) => save({ swatchGroup: e.target.value })} placeholder="GUID..." />
-            </div>
-            <div className={rowClass}>
-              <span className="text-xs text-gray-400">Default Swatch</span>
-              <input className={smallInputClass + " w-32"} value={item.defaultSwatch ?? '0'}
-                onChange={(e) => save({ defaultSwatch: e.target.value })} />
-            </div>
-            <div className={rowClass}>
-              <span className="text-xs text-gray-400">Color Zone Count</span>
-              <select className={smallInputClass} value={item.swatchColorZoneCount ?? 0}
-                onChange={(e) => save({ swatchColorZoneCount: parseInt(e.target.value) })}>
-                <option value={0}>One Color (0)</option>
-                <option value={1}>Two Zones (1)</option>
-                <option value={2}>Three Zones (2)</option>
-                <option value={3}>Four Zones (3)</option>
-              </select>
-            </div>
-            <div className={rowClass}>
-              <span className="text-xs text-gray-400">Thumbnail Type</span>
-              <select className={smallInputClass} value={item.swatchThumbnailType ?? 1}
-                onChange={(e) => save({ swatchThumbnailType: parseInt(e.target.value) })}>
-                <option value={1}>Item</option>
-                <option value={3}>Floor (top-down)</option>
-                <option value={4}>Wall (side-on)</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="bg-[#161923] border border-white/5 rounded-2xl p-5 shrink-0">
-            <p className={groupLabelClass}>Placement</p>
-            <div className={rowClass}>
-              <span className="text-xs text-gray-400">Price Skin Property</span>
-              <input className={smallInputClass + " w-32"} value={item.priceSkinProperty ?? 'None'}
-                onChange={(e) => save({ priceSkinProperty: e.target.value })} />
-            </div>
-            <div className={rowClass}>
-              <span className="text-xs text-gray-400">Multipurchase Override</span>
-              <input className={smallInputClass + " w-32"} value={item.multipurchaseOverride ?? 'NoOverride'}
-                onChange={(e) => save({ multipurchaseOverride: e.target.value })} />
-            </div>
-            <div className={rowClass}>
-              <span className="text-xs text-gray-400">Auto Select</span>
-              <Toggle value={item.autoSelect ?? false} onChange={(v) => save({ autoSelect: v })} />
-            </div>
-            <div className={rowClass}>
-              <span className="text-xs text-gray-400">Item Placement Tween Override</span>
-              <input className={smallInputClass + " w-32"} value={item.itemPlacementTweenOverride ?? 'None'}
-                onChange={(e) => save({ itemPlacementTweenOverride: e.target.value })} />
-            </div>
-            <p className={groupLabelClass}>Snapping</p>
-            <div className={rowClass}>
-              <span className="text-xs text-gray-400">Override Snap</span>
-              <Toggle value={item.overrideSnap ?? false} onChange={(v) => save({ overrideSnap: v })} />
-            </div>
-            <div className={rowClass}>
-              <span className="text-xs text-gray-400">Rotate To Snap Override</span>
-              <input className={smallInputClass + " w-32"} value={item.rotateToSnapOverride ?? 'NoOverride'}
-                onChange={(e) => save({ rotateToSnapOverride: e.target.value })} />
-            </div>
-          </div>
-
-          <div className="bg-[#161923] border border-white/5 rounded-2xl p-5 shrink-0">
-            <p className={groupLabelClass}>Rendering</p>
-            {([
-              ['Always Visible On Walls', 'alwaysVisibleOnWalls'],
-              ['Render As Wall', 'renderAsWall'],
-              ['Override Item Fading From Camera', 'overrideItemFadingFromCamera'],
-              ['Cannot Batch', 'cannotBatch'],
-            ] as [string, keyof Item][]).map(([label, field]) => (
-              <div key={field} className={rowClass}>
-                <span className="text-xs text-gray-400">{label}</span>
-                <Toggle value={!!(item[field])} onChange={(v) => save({ [field]: v })} />
-              </div>
-            ))}
-          </div>
-
-          <div className="bg-[#161923] border border-white/5 rounded-2xl p-5 shrink-0">
-            <p className={groupLabelClass}>Animation</p>
-            <div className={rowClass}>
-              <span className="text-xs text-gray-400">Override Item For Animation</span>
-              <input className={smallInputClass + " w-32"} value={item.overrideItemForAnimation ?? 'None'}
-                onChange={(e) => save({ overrideItemForAnimation: e.target.value })} />
-            </div>
-            <p className={groupLabelClass}>Bills</p>
-            <div className={rowClass}>
-              <span className="text-xs text-gray-400">Ignore Usage Level From Tags</span>
-              <Toggle value={item.ignoreUsageLevelFromTags ?? false} onChange={(v) => save({ ignoreUsageLevelFromTags: v })} />
-            </div>
-            <p className={groupLabelClass}>Dirtyness</p>
-            <div className={rowClass}>
-              <span className="text-xs text-gray-400">Dirtiness Speed Tier</span>
-              <input className={smallInputClass + " w-32"} value={item.dirtinessSpeedTier ?? 'None'}
-                onChange={(e) => save({ dirtinessSpeedTier: e.target.value })} />
-            </div>
-            <p className={groupLabelClass}>Brokenness</p>
-            <div className={rowClass}>
-              <span className="text-xs text-gray-400">Breaking Speed Tier</span>
-              <input className={smallInputClass + " w-32"} value={item.breakingSpeedTier ?? 'None'}
-                onChange={(e) => save({ breakingSpeedTier: e.target.value })} />
-            </div>
-          </div>
-
-          <div className="bg-[#161923] border border-white/5 rounded-2xl p-5 shrink-0">
-            <p className={groupLabelClass}>Variants in UI</p>
-            {item.itemVariants && item.itemVariants.length > 0 ? (
-              <div className="mb-3 flex flex-col gap-1.5">
-                {item.itemVariants.map((v, i) => (
-                  <div key={v.guid || i} className="flex items-center gap-2 px-3 py-2 bg-white/2 border border-white/5 rounded-lg">
-                    <span className="text-[10px] text-gray-500 font-mono shrink-0">Variant {i}</span>
-                    <span className="text-[10px] font-mono text-gray-400 truncate flex-1">{v.itemVariantGuid}</span>
-                    <button onClick={() => navigator.clipboard.writeText(v.itemVariantGuid)} className="text-gray-700 hover:text-gray-400 transition-colors shrink-0">
-                      <Copy size={10} />
-                    </button>
+          {level0Tab === 'basic' ? (
+            <>
+              <div className="flex flex-col md:flex-row gap-5 bg-[#161923] border border-white/5 rounded-2xl p-5 shrink-0">
+                <div className="flex flex-col gap-2 shrink-0 items-center">
+                  <span className={labelClass}>Catalog Image</span>
+                  <div className="relative w-28 h-28 bg-[#0e1017] border border-white/5 rounded-xl overflow-hidden group flex items-center justify-center shadow-inner">
+                    {liveThumbnailUrl
+                      ? <img src={liveThumbnailUrl} alt={name} className="w-full h-full object-contain p-2" />
+                      : <Image size={28} weight="thin" className="text-gray-600" />
+                    }
+                    <label className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1.5 cursor-pointer text-center p-2">
+                      <PencilSimple size={14} className="text-[#8b5cf6]" />
+                      <span className="text-[10px] font-semibold text-gray-200">Replace</span>
+                      <input type="file" accept="image/png, image/jpeg" className="hidden" onChange={handleThumbnailChange} />
+                    </label>
                   </div>
-                ))}
+                </div>
+                <div className="flex-1 flex flex-col gap-3 justify-center">
+                  <div className="flex flex-col gap-1.5">
+                    <label className={labelClass}>Display Name</label>
+                    <input type="text" className={inputClass} value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      onBlur={() => save({ name: name.trim() })}
+                      placeholder="Item display name..." />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="flex flex-col gap-1.5">
+                      <label className={labelClass}>Price ($)</label>
+                      <input type="number" className={inputClass + " [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"}
+                        value={price === 0 ? '' : price}
+                        onChange={(e) => setPrice(parseFloat(e.target.value) || 0)}
+                        onBlur={() => save({ price: Number(price) || 0 })}
+                        placeholder="0" min="0" />
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <label className={labelClass}>Price Multiplier</label>
+                      <input type="number" className={inputClass + " [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"}
+                        value={item.priceMultiplier ?? 1}
+                        onChange={(e) => save({ priceMultiplier: parseFloat(e.target.value) || 1 })}
+                        step="0.1" min="0" />
+                    </div>
+                  </div>
+                  <div className={rowClass}>
+                    <FieldLabel info="Removes this item from the in-game Build Mode catalog without deleting it from the mod.">Hide From Catalog</FieldLabel>
+                    <Toggle value={item.hideFromCatalog ?? false} onChange={(v) => save({ hideFromCatalog: v })} />
+                  </div>
+                  <div className={rowClass}>
+                    <FieldLabel info="Uses a custom interaction group for this item instead of the one inherited from its category.">Override Interaction Group</FieldLabel>
+                    <Toggle value={item.overrideInteractionGroup ?? false} onChange={(v) => save({ overrideInteractionGroup: v })} />
+                  </div>
+                  <div className={rowClass}>
+                    <FieldLabel info="Customizes which interactions are available when this item is shown as a low-detail impostor at a distance.">Override Impostor Interactions</FieldLabel>
+                    <Toggle value={item.overrideImpostorInteractions ?? false} onChange={(v) => save({ overrideImpostorInteractions: v })} />
+                  </div>
+                </div>
               </div>
-            ) : (
-              <p className="text-xs text-gray-600 italic mb-3">No variants defined</p>
-            )}
-            {([
-              ['Synchronize Swatch Among Variants', 'synchronizeSwatchAmongVariants'],
-              ['Ignore Remember Index For Category', 'ignoreRememberIndexForCategory'],
-              ['Has Size Variants Overrides', 'hasSizeVariantsOverrides'],
-            ] as [string, keyof Item][]).map(([label, field]) => (
-              <div key={field} className={rowClass}>
-                <span className="text-xs text-gray-400">{label}</span>
-                <Toggle value={!!(item[field])} onChange={(v) => save({ [field]: v })} />
-              </div>
-            ))}
-          </div>
 
-          <div className="bg-[#161923] border border-white/5 rounded-2xl p-5 shrink-0">
-            <p className={groupLabelClass}>Collectability</p>
-            <div className={rowClass}>
-              <span className="text-xs text-gray-400">Collectible Collection</span>
-              <input className={smallInputClass + " w-32"} value={item.collectibleCollection ?? 'None'}
-                onChange={(e) => save({ collectibleCollection: e.target.value })} />
-            </div>
-            <p className={groupLabelClass}>Patreon</p>
-            <div className={rowClass}>
-              <span className="text-xs text-gray-400">Patreon Name</span>
-              <input className={smallInputClass + " w-32"} value={item.patreonName ?? ''}
-                onChange={(e) => save({ patreonName: e.target.value })} placeholder="(none)" />
-            </div>
-          </div>
+              <div className="flex flex-col gap-2 bg-[#161923] border border-white/5 rounded-2xl p-5 shrink-0">
+                <label className={labelClass}>Catalog Description</label>
+                <textarea className="w-full bg-white/3 border border-white/5 rounded-xl px-4 py-3 text-sm text-gray-300 placeholder-gray-600 outline-none focus:border-[#8b5cf6]/40 transition-all min-h-[70px] resize-vertical leading-relaxed"
+                  value={description} onChange={(e) => setDescription(e.target.value)}
+                  onBlur={() => save({ description: description.trim() })}
+                  placeholder="Add a description..." />
+              </div>
+
+              <div className="bg-[#161923] border border-white/5 rounded-2xl p-5 shrink-0">
+                <p className={groupLabelClass}>Swatch</p>
+                <div className={rowClass}>
+                  <FieldLabel info="Enables a recolorable swatch picker for this item in Build Mode.">Has Swatches</FieldLabel>
+                  <Toggle value={item.hasSwatches ?? false} onChange={(v) => save({ hasSwatches: v })} />
+                </div>
+                <div className={rowClass}>
+                  <FieldLabel info="GUID linking this item to a swatch color group defined in the game's Swatches.setting.">Swatch Group GUID</FieldLabel>
+                  <input className={smallInputClass + " w-48"} value={item.swatchGroup ?? ''}
+                    onChange={(e) => save({ swatchGroup: e.target.value })} placeholder="GUID..." />
+                </div>
+                <div className={rowClass}>
+                  <FieldLabel info="Index of the swatch variant selected by default when this item is placed.">Default Swatch</FieldLabel>
+                  <input className={smallInputClass + " w-32"} value={item.defaultSwatch ?? '0'}
+                    onChange={(e) => save({ defaultSwatch: e.target.value })} />
+                </div>
+                <div className={rowClass}>
+                  <FieldLabel info="Number of independently recolorable zones on this item's texture, beyond the base color.">Color Zone Count</FieldLabel>
+                  <select className={smallInputClass} value={item.swatchColorZoneCount ?? 0}
+                    onChange={(e) => save({ swatchColorZoneCount: parseInt(e.target.value) })}>
+                    <option value={0}>One Color (0)</option>
+                    <option value={1}>Two Zones (1)</option>
+                    <option value={2}>Three Zones (2)</option>
+                    <option value={3}>Four Zones (3)</option>
+                  </select>
+                </div>
+                <div className={rowClass}>
+                  <FieldLabel info="Camera angle used to render this item's catalog thumbnail.">Thumbnail Type</FieldLabel>
+                  <select className={smallInputClass} value={item.swatchThumbnailType ?? 1}
+                    onChange={(e) => save({ swatchThumbnailType: parseInt(e.target.value) })}>
+                    <option value={1}>Item</option>
+                    <option value={3}>Floor (top-down)</option>
+                    <option value={4}>Wall (side-on)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="bg-[#161923] border border-white/5 rounded-2xl p-5 shrink-0">
+                <p className={groupLabelClass}>Placement</p>
+                <div className={rowClass}>
+                  <FieldLabel info="Automatically selects this item in its catalog category when Build Mode opens.">Auto Select</FieldLabel>
+                  <Toggle value={item.autoSelect ?? false} onChange={(v) => save({ autoSelect: v })} />
+                </div>
+                <div className={rowClass}>
+                  <FieldLabel info="Replaces the default wall/floor snapping behavior for this item.">Override Snap</FieldLabel>
+                  <Toggle value={item.overrideSnap ?? false} onChange={(v) => save({ overrideSnap: v })} />
+                </div>
+                <div className={rowClass}>
+                  <FieldLabel info="Renders this item using wall-surface shading rules instead of standard object shading.">Render As Wall</FieldLabel>
+                  <Toggle value={item.renderAsWall ?? false} onChange={(v) => save({ renderAsWall: v })} />
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="bg-[#161923] border border-white/5 rounded-2xl p-5 shrink-0">
+                <p className={groupLabelClass}>Placement</p>
+                <div className={rowClass}>
+                  <FieldLabel info="Catalog property used to vary this item's price by selected skin/finish.">Price Skin Property</FieldLabel>
+                  <input className={smallInputClass + " w-32"} value={item.priceSkinProperty ?? 'None'}
+                    onChange={(e) => save({ priceSkinProperty: e.target.value })} />
+                </div>
+                <div className={rowClass}>
+                  <FieldLabel info="Overrides whether multiple copies of this item can be bought in one purchase.">Multipurchase Override</FieldLabel>
+                  <input className={smallInputClass + " w-32"} value={item.multipurchaseOverride ?? 'NoOverride'}
+                    onChange={(e) => save({ multipurchaseOverride: e.target.value })} />
+                </div>
+                <div className={rowClass}>
+                  <FieldLabel info="Overrides the placement animation played when this item is set down in Build Mode.">Item Placement Tween Override</FieldLabel>
+                  <input className={smallInputClass + " w-32"} value={item.itemPlacementTweenOverride ?? 'None'}
+                    onChange={(e) => save({ itemPlacementTweenOverride: e.target.value })} />
+                </div>
+                <div className={rowClass}>
+                  <FieldLabel info="Overrides whether this item automatically rotates to match the surface it snaps to.">Rotate To Snap Override</FieldLabel>
+                  <input className={smallInputClass + " w-32"} value={item.rotateToSnapOverride ?? 'NoOverride'}
+                    onChange={(e) => save({ rotateToSnapOverride: e.target.value })} />
+                </div>
+              </div>
+
+              <div className="bg-[#161923] border border-white/5 rounded-2xl p-5 shrink-0">
+                <p className={groupLabelClass}>Snapping</p>
+                <div className={rowClass}>
+                  <FieldLabel speculative info="Restricts placement to wall surfaces.">Snap To Wall</FieldLabel>
+                  <Toggle value={item.snapToWall ?? false} onChange={(v) => save({ snapToWall: v })} />
+                </div>
+                <div className={rowClass}>
+                  <FieldLabel speculative info="Restricts placement to floor surfaces.">Snap To Floor</FieldLabel>
+                  <Toggle value={item.snapToFloor ?? false} onChange={(v) => save({ snapToFloor: v })} />
+                </div>
+                <div className={rowClass}>
+                  <FieldLabel speculative info="Restricts placement to ceiling surfaces.">Snap To Ceiling</FieldLabel>
+                  <Toggle value={item.snapToCeiling ?? false} onChange={(v) => save({ snapToCeiling: v })} />
+                </div>
+                <div className={rowClass}>
+                  <FieldLabel speculative info="Allows this item to be placed anywhere, ignoring surface snapping.">Free Placement</FieldLabel>
+                  <Toggle value={item.freePlacement ?? false} onChange={(v) => save({ freePlacement: v })} />
+                </div>
+              </div>
+
+              <div className="bg-[#161923] border border-white/5 rounded-2xl p-5 shrink-0">
+                <p className={groupLabelClass}>Rendering</p>
+                <div className={rowClass}>
+                  <FieldLabel info="Keeps this item visible when behind a wall that would normally hide it from camera.">Always Visible On Walls</FieldLabel>
+                  <Toggle value={item.alwaysVisibleOnWalls ?? false} onChange={(v) => save({ alwaysVisibleOnWalls: v })} />
+                </div>
+                <div className={rowClass}>
+                  <FieldLabel info="Disables the automatic fade/hide behavior when the camera gets too close to this item.">Override Item Fading From Camera</FieldLabel>
+                  <Toggle value={item.overrideItemFadingFromCamera ?? false} onChange={(v) => save({ overrideItemFadingFromCamera: v })} />
+                </div>
+                <div className={rowClass}>
+                  <FieldLabel info="Excludes this item from render batching with others — use if it has unusual shaders or transparency that batching would break.">Cannot Batch</FieldLabel>
+                  <Toggle value={item.cannotBatch ?? false} onChange={(v) => save({ cannotBatch: v })} />
+                </div>
+                <div className={rowClass}>
+                  <FieldLabel speculative info="Whether this item casts a shadow.">Cast Shadow</FieldLabel>
+                  <Toggle value={item.castShadow ?? false} onChange={(v) => save({ castShadow: v })} />
+                </div>
+                <div className={rowClass}>
+                  <FieldLabel speculative info="Whether this item displays shadows cast onto it by other objects.">Receive Shadow</FieldLabel>
+                  <Toggle value={item.receiveShadow ?? false} onChange={(v) => save({ receiveShadow: v })} />
+                </div>
+                <div className={rowClass}>
+                  <FieldLabel speculative info="Overrides the scene's default lighting response for this item.">Override Lighting</FieldLabel>
+                  <Toggle value={item.overrideLighting ?? false} onChange={(v) => save({ overrideLighting: v })} />
+                </div>
+              </div>
+
+              <div className="bg-[#161923] border border-white/5 rounded-2xl p-5 shrink-0">
+                <p className={groupLabelClass}>Animation</p>
+                <div className={rowClass}>
+                  <FieldLabel info="Substitutes a different item's animation set for this item's interactions.">Override Item For Animation</FieldLabel>
+                  <input className={smallInputClass + " w-32"} value={item.overrideItemForAnimation ?? 'None'}
+                    onChange={(e) => save({ overrideItemForAnimation: e.target.value })} />
+                </div>
+                <div className={rowClass}>
+                  <FieldLabel speculative info="Whether this item plays an idle animation while in the world.">Has Idle Animation</FieldLabel>
+                  <Toggle value={item.hasIdleAnimation ?? false} onChange={(v) => save({ hasIdleAnimation: v })} />
+                </div>
+                <div className={rowClass}>
+                  <FieldLabel speculative info="Whether this item plays an animation when placed in Build Mode.">Has Place Animation</FieldLabel>
+                  <Toggle value={item.hasPlaceAnimation ?? false} onChange={(v) => save({ hasPlaceAnimation: v })} />
+                </div>
+                <p className={groupLabelClass}>Bills</p>
+                <div className={rowClass}>
+                  <FieldLabel info="Ignores the usage-level bill cost normally derived from this item's catalog tags.">Ignore Usage Level From Tags</FieldLabel>
+                  <Toggle value={item.ignoreUsageLevelFromTags ?? false} onChange={(v) => save({ ignoreUsageLevelFromTags: v })} />
+                </div>
+                <p className={groupLabelClass}>Dirtyness</p>
+                <div className={rowClass}>
+                  <FieldLabel info="How quickly this item accumulates dirtiness over time (e.g. None, Slow, Medium, Fast).">Dirtiness Speed Tier</FieldLabel>
+                  <input className={smallInputClass + " w-32"} value={item.dirtinessSpeedTier ?? 'None'}
+                    onChange={(e) => save({ dirtinessSpeedTier: e.target.value })} />
+                </div>
+                <p className={groupLabelClass}>Brokenness</p>
+                <div className={rowClass}>
+                  <FieldLabel info="How quickly this item can break down with use (e.g. None, Slow, Medium, Fast).">Breaking Speed Tier</FieldLabel>
+                  <input className={smallInputClass + " w-32"} value={item.breakingSpeedTier ?? 'None'}
+                    onChange={(e) => save({ breakingSpeedTier: e.target.value })} />
+                </div>
+              </div>
+
+              <div className="bg-[#161923] border border-white/5 rounded-2xl p-5 shrink-0">
+                <p className={groupLabelClass}>Variants in UI</p>
+                {item.itemVariants && item.itemVariants.length > 0 ? (
+                  <div className="mb-3 flex flex-col gap-1.5">
+                    {item.itemVariants.map((v, i) => (
+                      <div key={v.guid || i} className="flex items-center gap-2 px-3 py-2 bg-white/2 border border-white/5 rounded-lg">
+                        <span className="text-[10px] text-gray-500 font-mono shrink-0">Variant {i}</span>
+                        <span className="text-[10px] font-mono text-gray-400 truncate flex-1">{v.itemVariantGuid}</span>
+                        <button onClick={() => navigator.clipboard.writeText(v.itemVariantGuid)} className="text-gray-700 hover:text-gray-400 transition-colors shrink-0">
+                          <Copy size={10} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-600 italic mb-3">No variants defined</p>
+                )}
+                <div className={rowClass}>
+                  <FieldLabel info="Keeps the same swatch/color selection applied across all of this item's variants.">Synchronize Swatch Among Variants</FieldLabel>
+                  <Toggle value={item.synchronizeSwatchAmongVariants ?? false} onChange={(v) => save({ synchronizeSwatchAmongVariants: v })} />
+                </div>
+                <div className={rowClass}>
+                  <FieldLabel info="Stops the catalog from remembering this item's last-selected variant when reopening its category.">Ignore Remember Index For Category</FieldLabel>
+                  <Toggle value={item.ignoreRememberIndexForCategory ?? false} onChange={(v) => save({ ignoreRememberIndexForCategory: v })} />
+                </div>
+                <div className={rowClass}>
+                  <FieldLabel info="Indicates this item defines per-variant size overrides instead of sharing one size.">Has Size Variants Overrides</FieldLabel>
+                  <Toggle value={item.hasSizeVariantsOverrides ?? false} onChange={(v) => save({ hasSizeVariantsOverrides: v })} />
+                </div>
+                <div className={rowClass}>
+                  <FieldLabel speculative info="Marks this item as having selectable variants in the catalog.">Has Variants</FieldLabel>
+                  <Toggle value={item.hasVariants ?? false} onChange={(v) => save({ hasVariants: v })} />
+                </div>
+              </div>
+
+              <div className="bg-[#161923] border border-white/5 rounded-2xl p-5 shrink-0">
+                <p className={groupLabelClass}>Collectability</p>
+                <div className={rowClass}>
+                  <FieldLabel info="Groups this item into a named collectible set shown in the in-game collection tracker.">Collectible Collection</FieldLabel>
+                  <input className={smallInputClass + " w-32"} value={item.collectibleCollection ?? 'None'}
+                    onChange={(e) => save({ collectibleCollection: e.target.value })} />
+                </div>
+                <p className={groupLabelClass}>Patreon</p>
+                <div className={rowClass}>
+                  <FieldLabel info="Creator name shown on this item's Patreon-exclusive badge, if any.">Patreon Name</FieldLabel>
+                  <input className={smallInputClass + " w-32"} value={item.patreonName ?? ''}
+                    onChange={(e) => save({ patreonName: e.target.value })} placeholder="(none)" />
+                </div>
+              </div>
+            </>
+          )}
 
           {/* ── Delete item ── */}
           {onDeleteItem && (

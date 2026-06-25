@@ -1,8 +1,9 @@
 // src/components/ItemsPanel.tsx
-import React, { useRef, useState } from 'react'
+import React, { useMemo, useRef, useState } from 'react'
 import { Image, CaretDown, WarningCircle, Plus, X } from 'phosphor-react'
 import { useModStore } from '../store/useModStore'
 import { getMeshNodes } from '../lib/itemTextureSlots'
+import { validateItem, type ItemValidationResult } from '../lib/itemValidation'
 import type { Item, ComponentNode } from '../types/types'
 
 interface ItemsPanelProps {
@@ -12,11 +13,23 @@ interface ItemsPanelProps {
   onSelectItem: (item: Item) => void
   onSelectNode: (node: ComponentNode) => void
   onAddItem: () => void
+  onDeselectItem: () => void
   onAddChildNode: (item: Item) => void
   onRemoveChildNode: (item: Item, nodeGuid: string) => void
   coverThumbnailUrl: string | null
   coverThumbnailWarning: boolean
   onCoverUpload: (file: File) => void
+}
+
+// ── Status ring (validation/export-readiness) ─────────────────────────────────
+function StatusRing({ result }: { result: ItemValidationResult }) {
+  const colorClass = result.status === 'error'
+    ? 'border-rose-400'
+    : result.status === 'warning'
+      ? 'border-amber-400'
+      : 'border-emerald-400'
+  const title = result.issues.length > 0 ? result.issues.join('\n') : 'Ready to export'
+  return <div title={title} className={`w-2.5 h-2.5 rounded-full border-2 shrink-0 ${colorClass}`} />
 }
 
 // ── Node accordion (inline — shown when item is selected) ─────────────────────
@@ -146,6 +159,7 @@ interface ItemRowProps {
   selectedNodeKey: string | null
   onSelect: (item: Item) => void
   onSelectNode: (node: ComponentNode) => void
+  onDeselectItem: () => void
   onAddChildNode: (item: Item) => void
   onRemoveChildNode: (item: Item, nodeGuid: string) => void
 }
@@ -157,11 +171,15 @@ function ItemRow({
   selectedNodeKey,
   onSelect,
   onSelectNode,
+  onDeselectItem,
   onAddChildNode,
   onRemoveChildNode,
 }: ItemRowProps) {
   const getBlobUrlFromCache = useModStore((state) => state.getBlobUrlFromCache)
   const liveThumbnailUrl = getBlobUrlFromCache(item.thumbnailKey ?? null)
+  const validation = useMemo(() => validateItem(item), [item])
+  const [accordionOpen, setAccordionOpen] = useState(true)
+  const hasMeshNodes = getMeshNodes(item.components || []).length > 0
 
   return (
     <div className="flex flex-col">
@@ -198,10 +216,35 @@ function ItemRow({
           </span>
           <span className="text-[10px] text-gray-500 font-mono mt-0.5">${item.price ?? 0}</span>
         </div>
+
+        <div className="flex items-center gap-1.5 shrink-0">
+          <StatusRing result={validation} />
+          {isSelected && (
+            <>
+              <button
+                onClick={(e) => { e.stopPropagation(); onDeselectItem() }}
+                title="Deselect"
+                className="shrink-0 p-1 text-gray-600 hover:text-gray-300 hover:bg-white/5 rounded-lg transition-colors outline-none"
+              >
+                <X size={10} weight="bold" />
+              </button>
+              {hasMeshNodes && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); setAccordionOpen(o => !o) }}
+                  title={accordionOpen ? 'Collapse nodes' : 'Expand nodes'}
+                  className="shrink-0 p-1 text-gray-600 hover:text-gray-300 hover:bg-white/5 rounded-lg transition-colors outline-none"
+                >
+                  <CaretDown size={10} weight="bold"
+                    className={`transition-transform duration-200 ${accordionOpen ? 'rotate-0' : '-rotate-90'}`} />
+                </button>
+              )}
+            </>
+          )}
+        </div>
       </div>
 
-      {/* Node accordion — only when selected */}
-      {isSelected && (
+      {/* Node accordion — only when selected and not collapsed */}
+      {isSelected && accordionOpen && (
         <NodeAccordion
           item={item}
           selectedNodeKey={selectedNodeKey}
@@ -258,13 +301,14 @@ interface AccordionGroupProps {
   selectedNodeKey: string | null
   onSelect: (item: Item) => void
   onSelectNode: (node: ComponentNode) => void
+  onDeselectItem: () => void
   onAddChildNode: (item: Item) => void
   onRemoveChildNode: (item: Item, nodeGuid: string) => void
 }
 
 function AccordionGroup({
   group, selectedItemId, selectedNodeKey,
-  onSelect, onSelectNode, onAddChildNode, onRemoveChildNode,
+  onSelect, onSelectNode, onDeselectItem, onAddChildNode, onRemoveChildNode,
 }: AccordionGroupProps) {
   const anySelected = selectedItemId === group.parent.id ||
     group.children.some(c => c.id === selectedItemId)
@@ -280,6 +324,7 @@ function AccordionGroup({
             selectedNodeKey={selectedNodeKey}
             onSelect={onSelect}
             onSelectNode={onSelectNode}
+            onDeselectItem={onDeselectItem}
             onAddChildNode={onAddChildNode}
             onRemoveChildNode={onRemoveChildNode}
           />
@@ -305,6 +350,7 @@ function AccordionGroup({
               selectedNodeKey={selectedNodeKey}
               onSelect={onSelect}
               onSelectNode={onSelectNode}
+              onDeselectItem={onDeselectItem}
               onAddChildNode={onAddChildNode}
               onRemoveChildNode={onRemoveChildNode}
             />
@@ -323,6 +369,7 @@ export default function ItemsPanel({
   onSelectItem,
   onSelectNode,
   onAddItem,
+  onDeselectItem,
   onAddChildNode,
   onRemoveChildNode,
   coverThumbnailUrl,
@@ -419,6 +466,7 @@ export default function ItemsPanel({
                 selectedNodeKey={selectedNodeKey}
                 onSelect={onSelectItem}
                 onSelectNode={onSelectNode}
+                onDeselectItem={onDeselectItem}
                 onAddChildNode={onAddChildNode}
                 onRemoveChildNode={onRemoveChildNode}
               />
@@ -431,6 +479,7 @@ export default function ItemsPanel({
                 selectedNodeKey={selectedNodeKey}
                 onSelect={onSelectItem}
                 onSelectNode={onSelectNode}
+                onDeselectItem={onDeselectItem}
                 onAddChildNode={onAddChildNode}
                 onRemoveChildNode={onRemoveChildNode}
               />

@@ -154,6 +154,21 @@ export interface Item {
 
   // ── Prefab graph ─────────────────────────────────────────────────────────────
   components: ComponentNode[]
+
+  // ── Speculative (Claude Design mockup, Advanced tab) ──────────────────────────
+  // Not confirmed against real Items.setting key names. UI-only: ModImporter does not
+  // parse these and the exporter does not write them. Wire into import/export only
+  // after validating against a real exported mod with these settings.
+  snapToWall?: boolean
+  snapToFloor?: boolean
+  snapToCeiling?: boolean
+  freePlacement?: boolean
+  castShadow?: boolean
+  receiveShadow?: boolean
+  overrideLighting?: boolean
+  hasIdleAnimation?: boolean
+  hasPlaceAnimation?: boolean
+  hasVariants?: boolean
 }
 
 // ── Sensible defaults for a new/empty Item ────────────────────────────────────
@@ -204,6 +219,16 @@ export function makeDefaultItem(overrides: Partial<Item> = {}): Item {
     textureKeys: {},
     componentBlueprints: { rootDefaultStates: [], materialSurfaces: [] },
     components: [],
+    snapToWall: false,
+    snapToFloor: false,
+    snapToCeiling: false,
+    freePlacement: false,
+    castShadow: false,
+    receiveShadow: false,
+    overrideLighting: false,
+    hasIdleAnimation: false,
+    hasPlaceAnimation: false,
+    hasVariants: false,
     ...overrides,
   }
 }

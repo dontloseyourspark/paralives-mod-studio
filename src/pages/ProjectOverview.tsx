@@ -23,6 +23,7 @@ export default function ProjectOverview() {
     handleRemoveChildNode,
     handleDeleteItem,
     handleSelectItem,
+    handleDeselectItem,
     handleSelectNode,
     handleClearNode,
     handleWizardAdvancedEditing,
@@ -75,6 +76,7 @@ export default function ProjectOverview() {
         activeSelectedItem={activeSelectedItem}
         activeSelectedNode={activeSelectedNode}
         onSelectItem={handleSelectItem}
+        onDeselectItem={handleDeselectItem}
         onSelectNode={handleSelectNode}
         onClearNode={handleClearNode}
         onAddItem={handleAddNewItem}

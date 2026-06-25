@@ -16,6 +16,7 @@ interface WorkspaceCanvasProps {
   activeSelectedItem: Item | null
   activeSelectedNode: ComponentNode | null
   onSelectItem: (item: Item) => void
+  onDeselectItem: () => void
   onSelectNode: (node: ComponentNode) => void
   onAddItem: () => void
   onClearNode: () => void
@@ -38,6 +39,7 @@ export default function WorkspaceCanvas({
   activeSelectedItem,
   activeSelectedNode,
   onSelectItem,
+  onDeselectItem,
   onSelectNode,
   onAddItem,
   onClearNode,
@@ -115,6 +117,7 @@ export default function WorkspaceCanvas({
             selectedItemId={selectedItemId}
             selectedNodeKey={selectedNodeKey}
             onSelectItem={onSelectItem}
+            onDeselectItem={onDeselectItem}
             onSelectNode={onSelectNode}
             onAddItem={onAddItem}
             onAddChildNode={onAddChildNode}
