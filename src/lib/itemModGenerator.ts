@@ -74,6 +74,16 @@ function arrayEntry(entryGuid: string, fields: [string, string][]): string {
   return header + body
 }
 
+/**
+ * Derive a stable per-entry wrapper GUID from a value that has no GUID of its
+ * own stored in our data model (e.g. a bare RopeItems/ResizeSnapProfiles
+ * string). Deterministic so re-exporting the same data produces the same GUID.
+ */
+function deriveEntryGuid(seed: string): string {
+  const digits = seed.replace(/[^0-9]/g, '').split('').reverse().join('')
+  return digits.padEnd(19, '1').substring(0, 19)
+}
+
 // ── Per-item serializer ───────────────────────────────────────────────────────
 
 /**
@@ -170,6 +180,31 @@ function serializeItem(item: Item, modGuid: string): string {
   )
   lines.push(arrayBlock('MeshParts', meshPartEntries))
 
+  // RopeItems / ResizeSnapProfiles store only bare GUID strings — there's no
+  // separate per-entry "wrapper" GUID in our data model (unlike Tag/MeshParts/
+  // etc., which each carry their own .guid), so one is derived deterministically
+  // from the value itself so repeated exports of the same data are stable.
+  const ropeItemEntries = (item.ropeItems ?? []).map((guid) =>
+    arrayEntry(deriveEntryGuid(guid), [
+      ['GUID', deriveEntryGuid(guid)],
+      ['CustomModGUID', modGuid],
+      ['Value', guid],
+    ])
+  )
+  lines.push(arrayBlock('RopeItems', ropeItemEntries))
+
+  const resizeSnapProfileEntries = (item.resizeSnapProfiles ?? []).map((guid) =>
+    arrayEntry(deriveEntryGuid(guid), [
+      ['GUID', deriveEntryGuid(guid)],
+      ['CustomModGUID', modGuid],
+      ['Value', guid],
+    ])
+  )
+  lines.push(arrayBlock('ResizeSnapProfiles', resizeSnapProfileEntries))
+
+  // ── Nested Prefab ───────────────────────────────────────────────────────────
+  lines.push(boolField('OverrideNestedPrefabToSpawn', item.overrideNestedPrefabToSpawn ?? false))
+
   // ── Snapping ────────────────────────────────────────────────────────────────
   lines.push(boolField('OverrideSnap', item.overrideSnap ?? false))
   if (item.rotateToSnapOverride && item.rotateToSnapOverride !== 'NoOverride') {
@@ -195,13 +230,15 @@ function serializeItem(item: Item, modGuid: string): string {
   }
 
   // ── Variants ────────────────────────────────────────────────────────────────
-  const variantEntries = (item.itemVariants ?? []).map((v: ItemVariantEntry) =>
-    arrayEntry(v.guid, [
+  const variantEntries = (item.itemVariants ?? []).map((v: ItemVariantEntry) => {
+    const fields: [string, string][] = [
       ['GUID', v.guid],
       ['CustomModGUID', modGuid],
       ['ItemVariantGUID', v.itemVariantGuid],
-    ])
-  )
+    ]
+    if (v.useSurfaceThumbnailTexture) fields.push(['UseSurfaceThumbnailTexture', 'True'])
+    return arrayEntry(v.guid, fields)
+  })
   lines.push(arrayBlock('ItemVariants', variantEntries))
 
   lines.push(boolField('SynchronizeSwatchAmongVariants', item.synchronizeSwatchAmongVariants ?? false))

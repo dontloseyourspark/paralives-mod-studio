@@ -59,6 +59,7 @@ export interface ItemMeshPart {
 export interface ItemVariantEntry {
   guid: string           // entry GUID (throwaway)
   itemVariantGuid: string // GUID of the actual variant Item in AllItems
+  useSurfaceThumbnailTexture?: boolean  // UseSurfaceThumbnailTexture: — confirmed in-game, raw key unconfirmed in a real sample
 }
 
 // ── Main Item type ─────────────────────────────────────────────────────────────
@@ -134,6 +135,12 @@ export interface Item {
   collectibleCollection: string  // ('None' if unset)
   patreonName: string            // ('' if unset)
 
+  // ── Nested Prefab (Items.setting) ────────────────────────────────────────────
+  overrideNestedPrefabToSpawn: boolean
+
+  // ── Snapping (Items.setting) ─────────────────────────────────────────────────
+  resizeSnapProfiles: string[]  // array of GUIDs
+
   // ── Asset cache ──────────────────────────────────────────────────────────────
   thumbnailKey: string | null
 
@@ -154,21 +161,6 @@ export interface Item {
 
   // ── Prefab graph ─────────────────────────────────────────────────────────────
   components: ComponentNode[]
-
-  // ── Speculative (Claude Design mockup, Advanced tab) ──────────────────────────
-  // Not confirmed against real Items.setting key names. UI-only: ModImporter does not
-  // parse these and the exporter does not write them. Wire into import/export only
-  // after validating against a real exported mod with these settings.
-  snapToWall?: boolean
-  snapToFloor?: boolean
-  snapToCeiling?: boolean
-  freePlacement?: boolean
-  castShadow?: boolean
-  receiveShadow?: boolean
-  overrideLighting?: boolean
-  hasIdleAnimation?: boolean
-  hasPlaceAnimation?: boolean
-  hasVariants?: boolean
 }
 
 // ── Sensible defaults for a new/empty Item ────────────────────────────────────
@@ -214,21 +206,13 @@ export function makeDefaultItem(overrides: Partial<Item> = {}): Item {
     hasSizeVariantsOverrides: false,
     collectibleCollection: 'None',
     patreonName: '',
+    overrideNestedPrefabToSpawn: false,
+    resizeSnapProfiles: [],
     thumbnailKey: null,
     meshKeys: {},
     textureKeys: {},
     componentBlueprints: { rootDefaultStates: [], materialSurfaces: [] },
     components: [],
-    snapToWall: false,
-    snapToFloor: false,
-    snapToCeiling: false,
-    freePlacement: false,
-    castShadow: false,
-    receiveShadow: false,
-    overrideLighting: false,
-    hasIdleAnimation: false,
-    hasPlaceAnimation: false,
-    hasVariants: false,
     ...overrides,
   }
 }

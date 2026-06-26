@@ -74,7 +74,6 @@ export function makeDefaultComponents(
         HasMaxScale: 'True',
         MaxScale: 10,
       },
-      DefaultSwatchGroup: BASE_GAME_DETAIL_SURFACE_GUID,
       // ItemMeshReferences registry — null placeholder; prefabGenerator fills
       // this with the actual nodeGuid→assetGuid entries at serialisation time.
       // AssetMesh is stored directly on the ItemMeshReference component so

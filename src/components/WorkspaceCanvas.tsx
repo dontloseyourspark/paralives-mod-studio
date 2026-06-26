@@ -139,6 +139,7 @@ export default function WorkspaceCanvas({
               key={activeSelectedItem?.id}
               item={activeSelectedItem}
               activeNode={activeSelectedNode}
+              allItems={items}
               onSave={onSaveItem}
               onDeleteItem={onDeleteItem}
               onRemoveChildNode={onRemoveChildNode}

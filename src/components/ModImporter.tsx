@@ -52,6 +52,7 @@ interface RawItemMeta {
   patreonName?: string
   overrideInteractionGroup?: boolean
   overrideImpostorInteractions?: boolean
+  overrideNestedPrefabToSpawn?: boolean
 }
 
 export default function ModImporter({ onImportComplete, triggerRef }: ModImporterProps) {
@@ -323,6 +324,7 @@ export default function ModImporter({ onImportComplete, triggerRef }: ModImporte
           else if (key === 'PatreonName') currentItem.patreonName = value
           else if (key === 'OverrideInteractionGroup') currentItem.overrideInteractionGroup = value === 'True'
           else if (key === 'OverrideImpostorInteractions') currentItem.overrideImpostorInteractions = value === 'True'
+          else if (key === 'OverrideNestedPrefabToSpawn') currentItem.overrideNestedPrefabToSpawn = value === 'True'
           continue
         }
 
@@ -588,7 +590,16 @@ export default function ModImporter({ onImportComplete, triggerRef }: ModImporte
       const tags: import('../types/types').ItemTag[] = (arrays['Tag'] || []).map((e: RawArrayEntry) => ({ guid: e._entryGuid || '', value: e['Value'] || '' }))
       const colorZoneNames: import('../types/types').ItemColorZoneName[] = (arrays['ColorZoneNames'] || []).map((e: RawArrayEntry) => ({ guid: e._entryGuid || '', value: e['Value'] || '' }))
       const meshParts: import('../types/types').ItemMeshPart[] = (arrays['MeshParts'] || []).map((e: RawArrayEntry) => ({ guid: e._entryGuid || '', displayName: e['DisplayName'] || '' }))
-      const itemVariants: import('../types/types').ItemVariantEntry[] = (arrays['ItemVariants'] || []).map((e: RawArrayEntry) => ({ guid: e._entryGuid || '', itemVariantGuid: e['ItemVariantGUID'] || '' }))
+      // RopeItems / ResizeSnapProfiles: raw array key names are unconfirmed against a real
+      // sample (neither validated mod populates them) — best-effort guess following the
+      // same =ArrayName/@GUID/=Value: shape already confirmed for Tag/ColorZoneNames.
+      const ropeItems: string[] = (arrays['RopeItems'] || []).map((e: RawArrayEntry) => e['Value'] || '').filter(Boolean)
+      const resizeSnapProfiles: string[] = (arrays['ResizeSnapProfiles'] || []).map((e: RawArrayEntry) => e['Value'] || '').filter(Boolean)
+      const itemVariants: import('../types/types').ItemVariantEntry[] = (arrays['ItemVariants'] || []).map((e: RawArrayEntry) => ({
+        guid: e._entryGuid || '',
+        itemVariantGuid: e['ItemVariantGUID'] || '',
+        useSurfaceThumbnailTexture: e['UseSurfaceThumbnailTexture'] === 'True',
+      }))
       const variantGuids = itemVariants.length > 0 ? itemVariants.map(v => v.itemVariantGuid).filter(Boolean) : undefined
 
       return {
@@ -614,7 +625,8 @@ export default function ModImporter({ onImportComplete, triggerRef }: ModImporte
         autoSelect: metaItem.autoSelect ?? false,
         itemPlacementTweenOverride: metaItem.itemPlacementTweenOverride ?? 'None',
         meshParts,
-        ropeItems: [],
+        ropeItems,
+        resizeSnapProfiles,
         overrideSnap: metaItem.overrideSnap ?? false,
         rotateToSnapOverride: metaItem.rotateToSnapOverride ?? 'NoOverride',
         alwaysVisibleOnWalls: metaItem.alwaysVisibleOnWalls ?? false,
@@ -632,6 +644,7 @@ export default function ModImporter({ onImportComplete, triggerRef }: ModImporte
         hasSizeVariantsOverrides: metaItem.hasSizeVariantsOverrides ?? false,
         collectibleCollection: metaItem.collectibleCollection ?? 'None',
         patreonName: metaItem.patreonName ?? '',
+        overrideNestedPrefabToSpawn: metaItem.overrideNestedPrefabToSpawn ?? false,
         thumbnailKey: itemThumbnailKeys[metaItem.guid ?? ''] ?? null,
         displayNameGuid: metaItem.displayNameGuid ?? undefined,
         meshKeys,

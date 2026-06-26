@@ -16,6 +16,7 @@ interface ItemEditorPanelProps {
   onClearNode: () => void
   onDeleteItem?: (itemId: string) => void
   onRemoveChildNode?: (item: Item, nodeGuid: string) => void
+  allItems?: Item[]  // for resolving Item Variant GUIDs to display names
 }
 
 type NodeTab = 'textures' | 'prefab'
@@ -60,6 +61,113 @@ function FieldLabel({ children, info, speculative }: FieldLabelProps) {
         </HoverNote>
       )}
     </span>
+  )
+}
+
+// ─── Prefab property key → human-readable label ───────────────────────────────
+// Raw .prefab keys follow a consistent PascalCase convention (confirmed across
+// every field seen in two validated real mods plus the in-game editor's own
+// field labels) — e.g. "ItemCanBeStackedOn" → "Item Can Be Stacked On".
+
+function humanizeKey(key: string): string {
+  return key
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+}
+
+// ─── Default-injected fields per component type ────────────────────────────────
+// The Prefab tab only ever shows what's literally present in node.properties —
+// but the in-game editor always shows every field it knows about with a default
+// value, even when absent from the source .prefab (e.g. a fresh Sheep.prefab has
+// no `PathfindingImpact:` line, yet the game shows "Pathfinding Impact:
+// BlockWalking"). These maps close that gap: merged in for any key NOT already
+// present, so editing one "promotes" it into real, exported properties — fields
+// never touched stay display-only defaults, never written to the saved item.
+// Confirmed against the in-game editor's own field list. Raw key names follow
+// the PascalCase-of-the-label convention confirmed across every other field in
+// this codebase (zero exceptions found across two validated real mods).
+const ITEM_OBJECT_ROOT_DEFAULTS: Record<string, PrefabPropertyValue> = {
+  DefaultSwatchGroup: '',
+  DefaultSwatchGUID: '0',
+  IsWallItem: 'False',
+  IsCeilingItem: 'False',
+  PathfindingImpact: 'BlockWalking',
+  IsResizable: 'False',
+  CanSetAlphaDirty: 'False',
+  ItemIsFlippable: 'bool3(False, False, False)',
+  FlipSpecificTransforms: 'False',
+  IsTransparent: 'False',
+  Skinnable: 'False',
+}
+const ITEM_CUBE_TRANSFORM_DEFAULTS: Record<string, PrefabPropertyValue> = {
+  MinAnchorPos: [0, 0, 0],
+  MaxAnchorPos: [0, 0, 0],
+  IsFlippable: 'False',
+  Skinnable: 'False',
+}
+const ITEM_MESH_REFERENCE_DEFAULTS: Record<string, PrefabPropertyValue> = {
+  OverrideMeshForCollision: 'False',
+  ShowOutlineOnMouseOver: 'True',
+  ForceUseAfterStencilBufferLayer: 'False',
+  ShadowCastingMode: 'On',
+  IsResizable: 'bool3(False, False, False)',
+  HasUserPadding: 'False',
+  HasMetadataPadding: 'True',
+  AutoTiling: 'None',
+  LayerOffset: 0,
+  Skinnable: 'False',
+}
+const NODE_DEFAULTS: Record<string, Record<string, PrefabPropertyValue>> = {
+  ItemObjectRoot: ITEM_OBJECT_ROOT_DEFAULTS,
+  ItemCubeTransform: ITEM_CUBE_TRANSFORM_DEFAULTS,
+  ItemMeshReference: ITEM_MESH_REFERENCE_DEFAULTS,
+}
+
+// ─── Simple string-array editor (Tags, Color Zone Names, Mesh Parts, Rope Items, etc.) ──
+
+interface SimpleArrayEditorProps {
+  label: string
+  values: string[]
+  onChange: (values: string[]) => void
+  placeholder?: string
+  info?: string
+}
+
+function SimpleArrayEditor({ label, values, onChange, placeholder, info }: SimpleArrayEditorProps) {
+  const itemInputClass = "bg-white/3 border border-white/5 rounded-lg px-3 py-1.5 text-xs font-medium text-white outline-none focus:border-[#8b5cf6]/40 transition-all font-mono flex-1"
+  return (
+    <div className="flex flex-col gap-1.5 py-1.5 border-b border-white/3 last:border-0">
+      <div className="flex items-center justify-between gap-3">
+        <FieldLabel info={info}>{label}</FieldLabel>
+        <button
+          onClick={() => onChange([...values, ''])}
+          className="shrink-0 flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-semibold text-gray-500 hover:text-[#a78bfa] hover:bg-[#8b5cf6]/10 rounded transition-colors"
+        >
+          + Add
+        </button>
+      </div>
+      {values.length === 0 ? (
+        <p className="text-[10px] text-gray-600 italic">None</p>
+      ) : (
+        values.map((v, i) => (
+          <div key={i} className="flex items-center gap-1.5">
+            <span className="text-[9px] text-gray-600 w-4 shrink-0 text-right">{i + 1}</span>
+            <input
+              className={itemInputClass}
+              value={v}
+              placeholder={placeholder}
+              onChange={(e) => { const next = [...values]; next[i] = e.target.value; onChange(next) }}
+            />
+            <button
+              onClick={() => onChange(values.filter((_, j) => j !== i))}
+              className="shrink-0 p-1 text-gray-600 hover:text-rose-400 hover:bg-rose-400/10 rounded-lg transition-colors"
+            >
+              <X size={10} weight="bold" />
+            </button>
+          </div>
+        ))
+      )}
+    </div>
   )
 }
 
@@ -246,11 +354,12 @@ interface PropRowProps {
 
 function PropRow({ propKey, value, onChange }: PropRowProps) {
   const inputClass = "bg-white/3 border border-white/8 rounded-lg px-2.5 py-1 text-xs text-white outline-none focus:border-[#8b5cf6]/40 transition-all font-mono"
+  const label = humanizeKey(propKey)
 
   if (value === null || value === undefined || (typeof value === 'object' && !Array.isArray(value))) {
     return (
       <div className="flex items-center justify-between gap-3 py-1.5 border-b border-white/3">
-        <span className="text-[11px] text-gray-400 font-medium">{propKey}</span>
+        <span className="text-[11px] text-gray-400 font-medium">{label}</span>
         <span className="text-[10px] text-gray-600 font-mono">—</span>
       </div>
     )
@@ -260,7 +369,7 @@ function PropRow({ propKey, value, onChange }: PropRowProps) {
     const strVal = String(value)
     return (
       <div className="flex items-center justify-between gap-3 py-1.5 border-b border-white/3">
-        <span className="text-[11px] text-gray-400 shrink-0 font-medium">{propKey}</span>
+        <span className="text-[11px] text-gray-400 shrink-0 font-medium">{label}</span>
         <div className="flex items-center gap-1.5 min-w-0">
           <span className="text-[10px] font-mono text-gray-500 truncate">{strVal}</span>
           <button onClick={() => navigator.clipboard.writeText(strVal)} className="text-gray-600 hover:text-gray-300 transition-colors shrink-0" title="Copy GUID">
@@ -276,7 +385,7 @@ function PropRow({ propKey, value, onChange }: PropRowProps) {
     const isTrue = value === 'True'
     return (
       <div className="flex items-center justify-between gap-3 py-1.5 border-b border-white/3">
-        <span className="text-[11px] text-gray-400 font-medium">{propKey}</span>
+        <span className="text-[11px] text-gray-400 font-medium">{label}</span>
         <button
           onClick={() => onChange(propKey, isTrue ? 'False' : 'True')}
           className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${isTrue ? 'bg-[#8b5cf6]' : 'bg-white/10'}`}
@@ -288,14 +397,14 @@ function PropRow({ propKey, value, onChange }: PropRowProps) {
   }
 
   if (isVector(value)) {
-    const labels = ['X', 'Y', 'Z', 'W']
+    const axisLabels = ['X', 'Y', 'Z', 'W']
     return (
       <div className="flex flex-col gap-1 py-1.5 border-b border-white/3">
-        <span className="text-[11px] text-gray-400 font-medium">{propKey}</span>
+        <span className="text-[11px] text-gray-400 font-medium">{label}</span>
         <div className="flex gap-1.5">
           {value.map((v, i) => (
             <div key={i} className="flex-1 flex flex-col gap-0.5">
-              <span className="text-[9px] text-gray-600 text-center">{labels[i] ?? i}</span>
+              <span className="text-[9px] text-gray-600 text-center">{axisLabels[i] ?? i}</span>
               <input
                 type="number"
                 className={`${inputClass} w-full text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`}
@@ -316,7 +425,7 @@ function PropRow({ propKey, value, onChange }: PropRowProps) {
   if (typeof value === 'number') {
     return (
       <div className="flex items-center justify-between gap-3 py-1.5 border-b border-white/3">
-        <span className="text-[11px] text-gray-400 font-medium shrink-0">{propKey}</span>
+        <span className="text-[11px] text-gray-400 font-medium shrink-0">{label}</span>
         <input
           type="number"
           className={`${inputClass} w-28 text-right [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`}
@@ -328,10 +437,27 @@ function PropRow({ propKey, value, onChange }: PropRowProps) {
   }
 
   if (typeof value === 'string' && value.startsWith('bool3(')) {
+    const axisValues = value.replace('bool3(', '').replace(')', '').split(',').map(s => s.trim() === 'True')
+    const axisLabels = ['X', 'Y', 'Z']
     return (
       <div className="flex items-center justify-between gap-3 py-1.5 border-b border-white/3">
-        <span className="text-[11px] text-gray-400 font-medium">{propKey}</span>
-        <span className="text-[10px] font-mono text-gray-500">{value}</span>
+        <span className="text-[11px] text-gray-400 font-medium">{label}</span>
+        <div className="flex gap-3">
+          {axisValues.map((v, i) => (
+            <div key={i} className="flex items-center gap-1.5">
+              <span className="text-[9px] text-gray-600">{axisLabels[i] ?? i}</span>
+              <button
+                onClick={() => {
+                  const updated = [...axisValues]; updated[i] = !v
+                  onChange(propKey, `bool3(${updated.map(b => b ? 'True' : 'False').join(', ')})`)
+                }}
+                className={`relative w-7 h-4 rounded-full transition-colors shrink-0 ${v ? 'bg-[#8b5cf6]' : 'bg-white/10'}`}
+              >
+                <span className={`absolute top-0.5 w-3 h-3 bg-white rounded-full shadow transition-all ${v ? 'left-[14px]' : 'left-0.5'}`} />
+              </button>
+            </div>
+          ))}
+        </div>
       </div>
     )
   }
@@ -339,7 +465,7 @@ function PropRow({ propKey, value, onChange }: PropRowProps) {
   if (typeof value === 'string') {
     return (
       <div className="flex items-center justify-between gap-3 py-1.5 border-b border-white/3">
-        <span className="text-[11px] text-gray-400 font-medium shrink-0">{propKey}</span>
+        <span className="text-[11px] text-gray-400 font-medium shrink-0">{label}</span>
         <input
           type="text"
           className={`${inputClass} flex-1 min-w-0 text-right`}
@@ -352,7 +478,7 @@ function PropRow({ propKey, value, onChange }: PropRowProps) {
 
   return (
     <div className="flex items-center justify-between gap-3 py-1.5 border-b border-white/3">
-      <span className="text-[11px] text-gray-400 font-medium">{propKey}</span>
+      <span className="text-[11px] text-gray-400 font-medium">{label}</span>
       <span className="text-[10px] text-gray-600 font-mono">—</span>
     </div>
   )
@@ -378,7 +504,7 @@ function AssetMeshRow({ item, node, value, onSave }: AssetMeshRowProps) {
 
   return (
     <div className="flex items-center justify-between gap-3 py-1.5 border-b border-white/3">
-      <span className="text-[11px] text-gray-400 shrink-0 font-medium">AssetMesh</span>
+      <span className="text-[11px] text-gray-400 shrink-0 font-medium">Asset Mesh</span>
       <div className="flex items-center gap-1.5 min-w-0">
         {strVal && (
           <>
@@ -437,7 +563,8 @@ function ComponentSection({ item, node, defaultOpen = true, onSave }: ComponentS
     onSave({ ...item, components: updatedComponents })
   }
 
-  const propEntries = Object.entries(node.properties)
+  const mergedProperties = { ...(NODE_DEFAULTS[node.type] ?? {}), ...node.properties }
+  const propEntries = Object.entries(mergedProperties)
   const hasGuid = propEntries.some(([, v]) => isGuidLike(v))
 
   return (
@@ -468,7 +595,7 @@ function ComponentSection({ item, node, defaultOpen = true, onSave }: ComponentS
                 return (
                   <div key={key} className="mb-1">
                     <div className="flex items-center justify-between gap-3 py-1.5 border-b border-white/3">
-                      <span className="text-[11px] text-gray-300 font-semibold">{key}</span>
+                      <span className="text-[11px] text-gray-300 font-semibold">{humanizeKey(key)}</span>
                       {_value !== undefined && _value !== null ? (
                         isBoolString(_value) ? (
                           <button
@@ -497,7 +624,7 @@ function ComponentSection({ item, node, defaultOpen = true, onSave }: ComponentS
               if (val === null) {
                 return (
                   <div key={key} className="flex items-center justify-between gap-3 py-1.5 border-b border-white/3">
-                    <span className="text-[11px] text-gray-400 font-medium">{key}</span>
+                    <span className="text-[11px] text-gray-400 font-medium">{humanizeKey(key)}</span>
                     <span className="text-[10px] text-gray-600 bg-white/3 px-1.5 py-0.5 rounded font-mono">registry</span>
                   </div>
                 )
@@ -634,7 +761,7 @@ function DeleteItemButton({ onDelete, label = 'Delete Item' }: { onDelete: () =>
   )
 }
 
-export default function ItemEditorPanel({ item, activeNode, onSave, onClearNode, onDeleteItem, onRemoveChildNode }: ItemEditorPanelProps) {
+export default function ItemEditorPanel({ item, activeNode, onSave, onClearNode, onDeleteItem, onRemoveChildNode, allItems }: ItemEditorPanelProps) {
   const getBlobUrlFromCache = useModStore((state) => state.getBlobUrlFromCache)
   const [name, setName] = useState(item?.name || '')
   const [price, setPrice] = useState<number>(item?.price ?? 0)
@@ -754,6 +881,17 @@ export default function ItemEditorPanel({ item, activeNode, onSave, onClearNode,
                 </div>
               </div>
 
+              <div className="bg-[#161923] border border-white/5 rounded-2xl p-5 shrink-0">
+                <p className={groupLabelClass}>Tags</p>
+                <SimpleArrayEditor
+                  label="Tag"
+                  values={(item.tags ?? []).map(t => t.value)}
+                  onChange={(next) => save({ tags: next.map((value, i) => ({ guid: item.tags?.[i]?.guid ?? crypto.randomUUID(), value })) })}
+                  placeholder="Build-mode tag GUID..."
+                  info="Build-mode catalog tags (e.g. Toilets, Plumbing) controlling which catalog categories this item appears under."
+                />
+              </div>
+
               <div className="flex flex-col gap-2 bg-[#161923] border border-white/5 rounded-2xl p-5 shrink-0">
                 <label className={labelClass}>Catalog Description</label>
                 <textarea className="w-full bg-white/3 border border-white/5 rounded-xl px-4 py-3 text-sm text-gray-300 placeholder-gray-600 outline-none focus:border-[#8b5cf6]/40 transition-all min-h-[70px] resize-vertical leading-relaxed"
@@ -797,6 +935,13 @@ export default function ItemEditorPanel({ item, activeNode, onSave, onClearNode,
                     <option value={4}>Wall (side-on)</option>
                   </select>
                 </div>
+                <SimpleArrayEditor
+                  label="Color Zone Names"
+                  values={(item.colorZoneNames ?? []).map(c => c.value)}
+                  onChange={(next) => save({ colorZoneNames: next.map((value, i) => ({ guid: item.colorZoneNames?.[i]?.guid ?? crypto.randomUUID(), value })) })}
+                  placeholder="Translation GUID..."
+                  info="Translation-string GUIDs naming each recolorable zone shown in the swatch picker."
+                />
               </div>
 
               <div className="bg-[#161923] border border-white/5 rounded-2xl p-5 shrink-0">
@@ -839,25 +984,34 @@ export default function ItemEditorPanel({ item, activeNode, onSave, onClearNode,
                   <input className={smallInputClass + " w-32"} value={item.rotateToSnapOverride ?? 'NoOverride'}
                     onChange={(e) => save({ rotateToSnapOverride: e.target.value })} />
                 </div>
+                <SimpleArrayEditor
+                  label="Resize Snap Profiles"
+                  values={item.resizeSnapProfiles ?? []}
+                  onChange={(v) => save({ resizeSnapProfiles: v })}
+                  placeholder="Snap profile GUID..."
+                  info="Profiles controlling how this item snaps to walls/floors/other items when resized."
+                />
+                <SimpleArrayEditor
+                  label="Mesh Parts"
+                  values={(item.meshParts ?? []).map(p => p.displayName)}
+                  onChange={(next) => save({ meshParts: next.map((displayName, i) => ({ guid: item.meshParts?.[i]?.guid ?? crypto.randomUUID(), displayName })) })}
+                  placeholder="Mesh part display name..."
+                  info="Names sub-parts of this item's mesh, e.g. for box/floor-plan tools."
+                />
+                <SimpleArrayEditor
+                  label="Rope Items"
+                  values={item.ropeItems ?? []}
+                  onChange={(v) => save({ ropeItems: v })}
+                  placeholder="Rope item GUID..."
+                  info="GUIDs of items connected to this one by a rope (e.g. string lights)."
+                />
               </div>
 
               <div className="bg-[#161923] border border-white/5 rounded-2xl p-5 shrink-0">
-                <p className={groupLabelClass}>Snapping</p>
+                <p className={groupLabelClass}>Nested Prefab</p>
                 <div className={rowClass}>
-                  <FieldLabel speculative info="Restricts placement to wall surfaces.">Snap To Wall</FieldLabel>
-                  <Toggle value={item.snapToWall ?? false} onChange={(v) => save({ snapToWall: v })} />
-                </div>
-                <div className={rowClass}>
-                  <FieldLabel speculative info="Restricts placement to floor surfaces.">Snap To Floor</FieldLabel>
-                  <Toggle value={item.snapToFloor ?? false} onChange={(v) => save({ snapToFloor: v })} />
-                </div>
-                <div className={rowClass}>
-                  <FieldLabel speculative info="Restricts placement to ceiling surfaces.">Snap To Ceiling</FieldLabel>
-                  <Toggle value={item.snapToCeiling ?? false} onChange={(v) => save({ snapToCeiling: v })} />
-                </div>
-                <div className={rowClass}>
-                  <FieldLabel speculative info="Allows this item to be placed anywhere, ignoring surface snapping.">Free Placement</FieldLabel>
-                  <Toggle value={item.freePlacement ?? false} onChange={(v) => save({ freePlacement: v })} />
+                  <FieldLabel info="Spawns a different, nested prefab alongside this item instead of the default one.">Override Nested Prefab To Spawn</FieldLabel>
+                  <Toggle value={item.overrideNestedPrefabToSpawn ?? false} onChange={(v) => save({ overrideNestedPrefabToSpawn: v })} />
                 </div>
               </div>
 
@@ -875,18 +1029,6 @@ export default function ItemEditorPanel({ item, activeNode, onSave, onClearNode,
                   <FieldLabel info="Excludes this item from render batching with others — use if it has unusual shaders or transparency that batching would break.">Cannot Batch</FieldLabel>
                   <Toggle value={item.cannotBatch ?? false} onChange={(v) => save({ cannotBatch: v })} />
                 </div>
-                <div className={rowClass}>
-                  <FieldLabel speculative info="Whether this item casts a shadow.">Cast Shadow</FieldLabel>
-                  <Toggle value={item.castShadow ?? false} onChange={(v) => save({ castShadow: v })} />
-                </div>
-                <div className={rowClass}>
-                  <FieldLabel speculative info="Whether this item displays shadows cast onto it by other objects.">Receive Shadow</FieldLabel>
-                  <Toggle value={item.receiveShadow ?? false} onChange={(v) => save({ receiveShadow: v })} />
-                </div>
-                <div className={rowClass}>
-                  <FieldLabel speculative info="Overrides the scene's default lighting response for this item.">Override Lighting</FieldLabel>
-                  <Toggle value={item.overrideLighting ?? false} onChange={(v) => save({ overrideLighting: v })} />
-                </div>
               </div>
 
               <div className="bg-[#161923] border border-white/5 rounded-2xl p-5 shrink-0">
@@ -895,14 +1037,6 @@ export default function ItemEditorPanel({ item, activeNode, onSave, onClearNode,
                   <FieldLabel info="Substitutes a different item's animation set for this item's interactions.">Override Item For Animation</FieldLabel>
                   <input className={smallInputClass + " w-32"} value={item.overrideItemForAnimation ?? 'None'}
                     onChange={(e) => save({ overrideItemForAnimation: e.target.value })} />
-                </div>
-                <div className={rowClass}>
-                  <FieldLabel speculative info="Whether this item plays an idle animation while in the world.">Has Idle Animation</FieldLabel>
-                  <Toggle value={item.hasIdleAnimation ?? false} onChange={(v) => save({ hasIdleAnimation: v })} />
-                </div>
-                <div className={rowClass}>
-                  <FieldLabel speculative info="Whether this item plays an animation when placed in Build Mode.">Has Place Animation</FieldLabel>
-                  <Toggle value={item.hasPlaceAnimation ?? false} onChange={(v) => save({ hasPlaceAnimation: v })} />
                 </div>
                 <p className={groupLabelClass}>Bills</p>
                 <div className={rowClass}>
@@ -927,15 +1061,30 @@ export default function ItemEditorPanel({ item, activeNode, onSave, onClearNode,
                 <p className={groupLabelClass}>Variants in UI</p>
                 {item.itemVariants && item.itemVariants.length > 0 ? (
                   <div className="mb-3 flex flex-col gap-1.5">
-                    {item.itemVariants.map((v, i) => (
-                      <div key={v.guid || i} className="flex items-center gap-2 px-3 py-2 bg-white/2 border border-white/5 rounded-lg">
-                        <span className="text-[10px] text-gray-500 font-mono shrink-0">Variant {i + 1}</span>
-                        <span className="text-[10px] font-mono text-gray-400 truncate flex-1">{v.itemVariantGuid}</span>
-                        <button onClick={() => navigator.clipboard.writeText(v.itemVariantGuid)} className="text-gray-700 hover:text-gray-400 transition-colors shrink-0">
-                          <Copy size={10} />
-                        </button>
-                      </div>
-                    ))}
+                    {item.itemVariants.map((v, i) => {
+                      const variantName = allItems?.find(other => other.guid === v.itemVariantGuid)?.name
+                      return (
+                        <div key={v.guid || i} className="flex items-center gap-2 px-3 py-2 bg-white/2 border border-white/5 rounded-lg">
+                          <span className="text-[10px] text-gray-500 font-mono shrink-0">Variant {i + 1}</span>
+                          <span className="text-[10px] font-mono text-gray-400 truncate flex-1" title={v.itemVariantGuid}>
+                            {variantName || v.itemVariantGuid}
+                          </span>
+                          <FieldLabel info="Uses this variant's own surface as its catalog thumbnail instead of the parent item's.">
+                            <span className="text-[9px] text-gray-500">Surface Thumbnail</span>
+                          </FieldLabel>
+                          <Toggle
+                            value={v.useSurfaceThumbnailTexture ?? false}
+                            onChange={(checked) => {
+                              const nextVariants = item.itemVariants.map((entry, j) => j === i ? { ...entry, useSurfaceThumbnailTexture: checked } : entry)
+                              save({ itemVariants: nextVariants })
+                            }}
+                          />
+                          <button onClick={() => navigator.clipboard.writeText(v.itemVariantGuid)} className="text-gray-700 hover:text-gray-400 transition-colors shrink-0">
+                            <Copy size={10} />
+                          </button>
+                        </div>
+                      )
+                    })}
                   </div>
                 ) : (
                   <p className="text-xs text-gray-600 italic mb-3">No variants defined</p>
@@ -951,10 +1100,6 @@ export default function ItemEditorPanel({ item, activeNode, onSave, onClearNode,
                 <div className={rowClass}>
                   <FieldLabel info="Indicates this item defines per-variant size overrides instead of sharing one size.">Has Size Variants Overrides</FieldLabel>
                   <Toggle value={item.hasSizeVariantsOverrides ?? false} onChange={(v) => save({ hasSizeVariantsOverrides: v })} />
-                </div>
-                <div className={rowClass}>
-                  <FieldLabel speculative info="Marks this item as having selectable variants in the catalog.">Has Variants</FieldLabel>
-                  <Toggle value={item.hasVariants ?? false} onChange={(v) => save({ hasVariants: v })} />
                 </div>
               </div>
 
