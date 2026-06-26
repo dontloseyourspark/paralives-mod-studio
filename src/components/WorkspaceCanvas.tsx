@@ -159,6 +159,7 @@ export default function WorkspaceCanvas({
                 meshKeys={activeSelectedItem?.meshKeys ?? {}}
                 activeNode={activeSelectedNode}
                 item={activeSelectedItem}
+                onSave={onSaveItem}
               />
             </div>
           </>

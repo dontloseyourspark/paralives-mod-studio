@@ -53,7 +53,7 @@ interface ChildNodeRowProps {
 function ChildNodeRow({ item, child, selectedNodeKey, onSelectNode, onRemoveChildNode }: ChildNodeRowProps) {
   const [confirming, setConfirming] = useState(false)
   const childKey = `${child.id}_${child.type}`
-  const label = child.childIndex !== undefined ? `Child ${child.childIndex}` : 'Child'
+  const label = child.childIndex !== undefined ? `Child ${child.childIndex + 1}` : 'Child'
 
   if (confirming) {
     return (

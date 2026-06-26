@@ -20,6 +20,7 @@ interface MeshViewportProps {
   meshKeys: Record<string, string>
   activeNode: ComponentNode | null
   item: Item | null
+  onSave?: (updatedItem: Item) => void
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -88,9 +89,16 @@ function resolveTextureCacheKey(
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function MeshViewport({ meshKeys, activeNode, item }: MeshViewportProps) {
+export function MeshViewport({ meshKeys, activeNode, item, onSave }: MeshViewportProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef    = useRef<HTMLCanvasElement>(null)
+  const importInputRef = useRef<HTMLInputElement>(null)
+
+  const handleImportMesh = async (file: File) => {
+    if (!item || !activeNode || !onSave) return
+    const { importMeshForNode } = await import('../lib/meshImport')
+    onSave(await importMeshForNode(item, activeNode, file))
+  }
 
   // Cleanup function stored in a ref so it's always current
   const cleanupRef = useRef<(() => void) | null>(null)
@@ -162,7 +170,16 @@ export function MeshViewport({ meshKeys, activeNode, item }: MeshViewportProps) 
 
         // Load raw FBX bytes
         const blob = await assetDb.getFile(cacheKey)
-        if (!blob || cancelled) return
+        if (cancelled) return
+        if (!blob) {
+          // The node references a mesh asset that isn't in assetDb (e.g. a
+          // dangling AssetMesh GUID in the source mod, or a deleted blob).
+          // Surface this as an error instead of leaving the spinner stuck
+          // on "Loading mesh…" forever.
+          console.error('[MeshViewport] No stored blob for mesh cache key:', cacheKey)
+          setViewportState('error')
+          return
+        }
 
         const arrayBuffer = await blob.arrayBuffer()
         if (cancelled) return
@@ -461,6 +478,18 @@ export function MeshViewport({ meshKeys, activeNode, item }: MeshViewportProps) 
               <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
             </svg>
             <p className="text-[11px]">{hasMesh ? 'Select a node to preview' : 'No mesh imported'}</p>
+            {!hasMesh && activeNode && onSave && (
+              <>
+                <button
+                  onClick={() => importInputRef.current?.click()}
+                  className="mt-1 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-gray-300 bg-white/5 hover:bg-[#8b5cf6]/20 hover:text-[#a78bfa] transition-colors outline-none"
+                >
+                  Import Mesh…
+                </button>
+                <input ref={importInputRef} type="file" accept=".fbx" className="hidden"
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImportMesh(f); e.target.value = '' }} />
+              </>
+            )}
           </div>
         </div>
       )}
@@ -482,7 +511,7 @@ export function MeshViewport({ meshKeys, activeNode, item }: MeshViewportProps) 
               <line x1="12" y1="8" x2="12" y2="12" />
               <line x1="12" y1="16" x2="12.01" y2="16" />
             </svg>
-            <p className="text-[11px]">Failed to parse FBX</p>
+            <p className="text-[11px]">Couldn't load this mesh</p>
           </div>
         </div>
       )}

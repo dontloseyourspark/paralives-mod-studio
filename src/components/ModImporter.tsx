@@ -62,16 +62,16 @@ export default function ModImporter({ onImportComplete, triggerRef }: ModImporte
 
     const newProjectId = crypto.randomUUID()
 
-    const existingKeys = await assetDb.listKeys()
-    await Promise.all(
-      existingKeys
-        .filter(k =>
-          k.startsWith('item_thumb_') ||
-          k === 'PROJECT_COVER_MASTER' ||
-          (!k.startsWith('cover_'))
-        )
-        .map(k => assetDb.deleteFile(k))
-    )
+    // NOTE: there used to be a pre-import purge here that deleted every non-
+    // `cover_*` key in assetDb before writing the new import. Its filter was
+    // `k.startsWith('item_thumb_') || k === 'PROJECT_COVER_MASTER' || !k.startsWith('cover_')`
+    // — that third clause is true for almost any key, so it wiped every other
+    // project's mesh_*/item_tex_*/item_thumb_* data on every single import, not
+    // just stale keys from a previous import of *this* mod. It's gone now:
+    // mesh/texture/thumbnail keys are all derived from GUIDs embedded in the
+    // mod's own files (FBX .meta GUID, Items.setting GUID), which are stable
+    // across re-imports of the same mod — so re-importing just overwrites its
+    // own keys in place. There's no accumulation risk left to guard against.
 
     let itemsSettingContent = ''
     let translationsSettingContent = ''
@@ -163,10 +163,17 @@ export default function ModImporter({ onImportComplete, triggerRef }: ModImporte
         continue
       }
 
-      const depth = path.split('/').length
+      // Root-level mod assets (FBX/PNG/thumbnail). These are only ever expected
+      // directly under the mod's own root folder — but some mods (especially
+      // older or re-packaged Workshop downloads) arrive with an extra wrapping
+      // folder around that root, shifting everything one or more levels deeper.
+      // Settings/Prefabs/_GeneratedThumbnails content is already excluded above
+      // via path.includes() (depth-agnostic), so matching these by extension
+      // alone — without also requiring an exact path depth — is safe and matches
+      // that same robust style instead of silently dropping the file.
 
       // PNG meta sidecars — extract assetGuid, keyed by basename
-      if (depth === 2 && fileName.endsWith('.png.meta')) {
+      if (fileName.endsWith('.png.meta')) {
         const basename = fileName.replace('.png.meta', '')
         const metaText = await entry.text()
         const guidMatch = metaText.match(/^GUID:\s*(.+)$/m)
@@ -175,24 +182,24 @@ export default function ModImporter({ onImportComplete, triggerRef }: ModImporte
       }
 
       // Root-level PNG files — store File by basename, joined to GUID after scan
-      if (depth === 2 && fileName.endsWith('.png')) {
+      if (fileName.endsWith('.png')) {
         const basename = fileName.replace('.png', '')
         pngFileByBasename[basename] = await entry.getFile()
         continue
       }
 
-      if (depth === 2 && fileName.endsWith('.fbx.meta')) {
+      if (fileName.endsWith('.fbx.meta')) {
         const basename = fileName.replace('.fbx.meta', '')
         const metaText = await entry.text()
         const guidMatch = metaText.match(/^GUID:\s*(.+)$/m)
         if (guidMatch) fbxMetaGuids[basename] = guidMatch[1].trim()
         continue
       }
-      if (depth === 2 && fileName.endsWith('.fbx')) {
+      if (fileName.endsWith('.fbx')) {
         fbxFiles[fileName.replace('.fbx', '')] = await entry.getFile()
         continue
       }
-      if (depth === 2 && fileName.endsWith('.mod.thumbnail')) {
+      if (fileName.endsWith('.mod.thumbnail')) {
         const coverKey = `cover_${newProjectId}`
         await registerFileInCache(coverKey, await entry.getFile())
         projectCoverKey = coverKey

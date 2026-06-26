@@ -32,19 +32,32 @@ interface FieldLabelProps {
   speculative?: boolean
 }
 
+// Native `title` tooltips are slow to appear and easy to miss on a 10px icon,
+// so info/speculative affordances use a CSS-only hover popover instead.
+function HoverNote({ text, children }: { text: string; children: React.ReactNode }) {
+  return (
+    <span className="relative inline-flex group">
+      {children}
+      <span className="pointer-events-none absolute z-30 bottom-full left-1/2 -translate-x-1/2 mb-1.5 hidden group-hover:block w-max max-w-[220px] whitespace-normal rounded-lg border border-white/10 bg-[#0e1017] px-2.5 py-1.5 text-[10px] font-normal leading-snug text-gray-300 shadow-lg">
+        {text}
+      </span>
+    </span>
+  )
+}
+
 function FieldLabel({ children, info, speculative }: FieldLabelProps) {
   return (
     <span className="text-xs text-gray-400 flex items-center gap-1.5">
       {children}
       {speculative && (
-        <span title={SPECULATIVE_FIELD_NOTE}>
+        <HoverNote text={SPECULATIVE_FIELD_NOTE}>
           <Warning size={10} className="text-yellow-500/70" />
-        </span>
+        </HoverNote>
       )}
       {info && (
-        <span title={info}>
+        <HoverNote text={info}>
           <Info size={10} className="text-gray-600 hover:text-gray-400 transition-colors" />
-        </span>
+        </HoverNote>
       )}
     </span>
   )
@@ -345,6 +358,50 @@ function PropRow({ propKey, value, onChange }: PropRowProps) {
   )
 }
 
+// ─── AssetMesh row — GUID display + import/replace mesh ────────────────────────
+
+interface AssetMeshRowProps {
+  item: Item
+  node: ComponentNode
+  value: PrefabPropertyValue
+  onSave: (updatedItem: Item) => void
+}
+
+function AssetMeshRow({ item, node, value, onSave }: AssetMeshRowProps) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const strVal = value != null ? String(value) : null
+
+  const handleImport = async (file: File) => {
+    const { importMeshForNode } = await import('../lib/meshImport')
+    onSave(await importMeshForNode(item, node, file))
+  }
+
+  return (
+    <div className="flex items-center justify-between gap-3 py-1.5 border-b border-white/3">
+      <span className="text-[11px] text-gray-400 shrink-0 font-medium">AssetMesh</span>
+      <div className="flex items-center gap-1.5 min-w-0">
+        {strVal && (
+          <>
+            <span className="text-[10px] font-mono text-gray-500 truncate">{strVal}</span>
+            <button onClick={() => navigator.clipboard.writeText(strVal)} className="text-gray-600 hover:text-gray-300 transition-colors shrink-0" title="Copy GUID">
+              <Copy size={10} />
+            </button>
+          </>
+        )}
+        <button
+          onClick={() => inputRef.current?.click()}
+          className="shrink-0 flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-semibold text-gray-500 hover:text-[#a78bfa] hover:bg-[#8b5cf6]/10 rounded transition-colors"
+        >
+          <UploadSimple size={10} />
+          {strVal ? 'Replace' : 'Import'}
+        </button>
+        <input ref={inputRef} type="file" accept=".fbx" className="hidden"
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImport(f); e.target.value = '' }} />
+      </div>
+    </div>
+  )
+}
+
 // ─── Single component section (collapsible) ───────────────────────────────────
 
 interface ComponentSectionProps {
@@ -398,10 +455,14 @@ function ComponentSection({ item, node, defaultOpen = true, onSave }: ComponentS
 
       {open && (
         <div className="px-3 pb-2 pt-1">
-          {propEntries.length === 0 ? (
+          {propEntries.length === 0 && node.type !== 'ItemMeshReference' ? (
             <span className="text-[11px] text-gray-600 italic py-2 block">No properties</span>
           ) : (
-            propEntries.map(([key, val]) => {
+            <>
+            {node.type === 'ItemMeshReference' && !('AssetMesh' in node.properties) && (
+              <AssetMeshRow item={item} node={node} value={null} onSave={onSave} />
+            )}
+            {propEntries.map(([key, val]) => {
               if (typeof val === 'object' && val !== null && !Array.isArray(val)) {
                 const { _value, ...subProps } = val as Record<string, PrefabPropertyValue | undefined>
                 return (
@@ -442,8 +503,13 @@ function ComponentSection({ item, node, defaultOpen = true, onSave }: ComponentS
                 )
               }
 
+              if (key === 'AssetMesh') {
+                return <AssetMeshRow key={key} item={item} node={node} value={val} onSave={onSave} />
+              }
+
               return <PropRow key={key} propKey={key} value={val} onChange={handleChange} />
-            })
+            })}
+            </>
           )}
 
           {hasGuid && (
@@ -481,7 +547,7 @@ interface NodeSectionProps {
 function NodeSection({ item, node, onSave }: NodeSectionProps) {
   const [tab, setTab] = useState<NodeTab>('prefab')
   const isRoot = node.childIndex === undefined
-  const label = isRoot ? 'Root' : `Child ${node.childIndex}`
+  const label = isRoot ? 'Root' : `Child ${node.childIndex! + 1}`
 
   const nodeComponents = item.components
     .filter(c => c.id === node.id)
@@ -863,7 +929,7 @@ export default function ItemEditorPanel({ item, activeNode, onSave, onClearNode,
                   <div className="mb-3 flex flex-col gap-1.5">
                     {item.itemVariants.map((v, i) => (
                       <div key={v.guid || i} className="flex items-center gap-2 px-3 py-2 bg-white/2 border border-white/5 rounded-lg">
-                        <span className="text-[10px] text-gray-500 font-mono shrink-0">Variant {i}</span>
+                        <span className="text-[10px] text-gray-500 font-mono shrink-0">Variant {i + 1}</span>
                         <span className="text-[10px] font-mono text-gray-400 truncate flex-1">{v.itemVariantGuid}</span>
                         <button onClick={() => navigator.clipboard.writeText(v.itemVariantGuid)} className="text-gray-700 hover:text-gray-400 transition-colors shrink-0">
                           <Copy size={10} />
@@ -921,7 +987,7 @@ export default function ItemEditorPanel({ item, activeNode, onSave, onClearNode,
 
   // ── Level 1+: node-level view (Prefab + Textures tabs) ──────────────────────
   const isRootNode = activeNode.childIndex === undefined
-  const nodeLabel = isRootNode ? 'Root' : `Child ${activeNode.childIndex}`
+  const nodeLabel = isRootNode ? 'Root' : `Child ${activeNode.childIndex! + 1}`
 
   return (
     <div className="h-full flex flex-col bg-transparent text-white select-none box-border">
