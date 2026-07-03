@@ -1,5 +1,10 @@
 // src/components/MeshViewport.tsx
 import React, { useEffect, useRef, useState, useCallback } from 'react'
+import {
+  Perspective, Cube, Circle, CircleDashed, Image as ImageIcon,
+  Sun, SunDim, Flashlight, Diamond,
+} from 'phosphor-react'
+import type { Icon as PhosphorIcon } from 'phosphor-react'
 import type { ComponentNode } from '../types/types'
 import type { Item } from '../types/types'
 import { itemTextureCacheKey } from '../lib/itemTextureSlots'
@@ -60,6 +65,16 @@ const LIGHTING_PRESETS = {
   flat:     { label: 'Flat',     env: 1.7,  ambient: 1.6, key: 0.0, fill: 0.0 },
 } as const
 type LightingPreset = keyof typeof LIGHTING_PRESETS
+
+// Icon per lighting preset — mirrors the intensity/character of the rig above
+// (Sun = balanced studio, SunDim = soft/diffused, Flashlight = single dramatic
+// key light, Diamond = flat/shadeless).
+const LIGHTING_ICONS: Record<LightingPreset, PhosphorIcon> = {
+  studio: Sun,
+  soft: SunDim,
+  dramatic: Flashlight,
+  flat: Diamond,
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -165,8 +180,10 @@ export function MeshViewport({ meshKeys, activeNode, item, onSave }: MeshViewpor
 
   // Kept in a ref so the setup effect can read the current lighting choice
   // without depending on it (lighting should persist across mesh changes).
+  // Updated in an effect (not during render) to avoid mutating a ref in the
+  // render phase.
   const lightingPresetRef = useRef(lightingPreset)
-  lightingPresetRef.current = lightingPreset
+  useEffect(() => { lightingPresetRef.current = lightingPreset }, [lightingPreset])
 
   // textureInfo is pure-derivable from props, so it's computed during render
   // rather than re-derived inside the effect — that's what lets hasTexture
@@ -737,16 +754,17 @@ export function MeshViewport({ meshKeys, activeNode, item, onSave }: MeshViewpor
               <ViewButton label="Top"   onClick={() => setAxisView('top')}   title="Top orthographic view" />
             </div>
             <div className="flex items-center gap-0.5 bg-black/60 backdrop-blur-sm border border-white/10 rounded-lg p-1">
-              <ViewButton label="Persp" active={projection === 'perspective'} onClick={() => changeProjection('perspective')} title="Perspective camera (free orbit)" />
-              <ViewButton label="Ortho" active={projection === 'orthographic'} onClick={() => changeProjection('orthographic')} title="Orthographic camera (pan + zoom only)" />
+              <IconButton icon={Perspective} label="Perspective" active={projection === 'perspective'} onClick={() => changeProjection('perspective')} title="Perspective camera (free orbit)" />
+              <IconButton icon={Cube} label="Orthographic" active={projection === 'orthographic'} onClick={() => changeProjection('orthographic')} title="Orthographic camera (pan + zoom only)" />
             </div>
           </div>
 
           {/* ── Lighting cluster (top-right) ── */}
           <div className="absolute top-3 right-3 flex items-center gap-0.5 bg-black/60 backdrop-blur-sm border border-white/10 rounded-lg p-1 z-10">
             {(Object.keys(LIGHTING_PRESETS) as LightingPreset[]).map((k) => (
-              <ViewButton
+              <IconButton
                 key={k}
+                icon={LIGHTING_ICONS[k]}
                 label={LIGHTING_PRESETS[k].label}
                 active={lightingPreset === k}
                 onClick={() => setLightingPreset(k)}
@@ -757,15 +775,16 @@ export function MeshViewport({ meshKeys, activeNode, item, onSave }: MeshViewpor
 
           {/* ── Mode toggle toolbar (bottom-center) ── */}
           <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-0.5 bg-black/60 backdrop-blur-sm border border-white/10 rounded-lg p-1 z-10">
-            <ViewButton label="Clay" active={mode === 'clay'} onClick={() => cycleMode('clay')} />
-            <ViewButton
+            <IconButton icon={Circle} label="Clay" active={mode === 'clay'} onClick={() => cycleMode('clay')} />
+            <IconButton
+              icon={ImageIcon}
               label="Textured"
               active={mode === 'textured'}
               disabled={!hasTexture}
               onClick={() => hasTexture && cycleMode('textured')}
               title={hasTexture ? 'Show texture' : 'No texture uploaded for this node'}
             />
-            <ViewButton label="Wire" active={mode === 'wireframe'} onClick={() => cycleMode('wireframe')} />
+            <IconButton icon={CircleDashed} label="Wireframe" active={mode === 'wireframe'} onClick={() => cycleMode('wireframe')} />
           </div>
         </>
       )}
@@ -773,7 +792,7 @@ export function MeshViewport({ meshKeys, activeNode, item, onSave }: MeshViewpor
   )
 }
 
-// ── Toolbar button ──────────────────────────────────────────────────────────────
+// ── Toolbar buttons ──────────────────────────────────────────────────────────────
 
 interface ViewButtonProps {
   label: string
@@ -783,6 +802,7 @@ interface ViewButtonProps {
   title?: string
 }
 
+// Text toolbar button — still used for the Front/Right/Top axis-snap cluster.
 function ViewButton({ label, active = false, disabled = false, onClick, title }: ViewButtonProps) {
   return (
     <button
@@ -799,6 +819,39 @@ function ViewButton({ label, active = false, disabled = false, onClick, title }:
       ].join(' ')}
     >
       {label}
+    </button>
+  )
+}
+
+interface IconButtonProps {
+  icon: PhosphorIcon
+  label: string  // accessible name + tooltip fallback; not rendered as visible text
+  active?: boolean
+  disabled?: boolean
+  onClick: () => void
+  title?: string  // overrides `label` as the hover tooltip when given (e.g. disabled-state copy)
+}
+
+// Icon-only toolbar button, matching the compact icon-cluster style of tools
+// like Meshy's viewport toolbar — used for projection, lighting, and shading
+// mode, where a glyph reads faster than a text label once you know the set.
+function IconButton({ icon: Icon, label, active = false, disabled = false, onClick, title }: IconButtonProps) {
+  return (
+    <button
+      onClick={onClick}
+      title={title ?? label}
+      aria-label={label}
+      disabled={disabled}
+      className={[
+        'flex items-center justify-center w-7 h-7 rounded-md transition-colors',
+        active
+          ? 'bg-white/15 text-white'
+          : disabled
+            ? 'text-gray-600 cursor-not-allowed'
+            : 'text-gray-400 hover:text-gray-200 hover:bg-white/8',
+      ].join(' ')}
+    >
+      <Icon size={14} weight={active ? 'fill' : 'regular'} />
     </button>
   )
 }
