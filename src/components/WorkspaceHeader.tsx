@@ -5,6 +5,7 @@ import type { ModProject } from '../types/types'
 import { useModStore } from '../store/useModStore'
 import { exportItemMod } from '../lib/itemModExporter'
 import WorkshopTagsModal from './WorkshopTagsModal'
+import ExportResultModal, { HIDE_EXPORT_INSTRUCTIONS_KEY, type ExportResult } from './ExportResultModal'
 
 interface WorkspaceHeaderProps {
   project: ModProject
@@ -36,6 +37,7 @@ export default function WorkspaceHeader({
   const [thumbnailWarning, setThumbnailWarning] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
   const [tagsModalOpen, setTagsModalOpen] = useState(false)
+  const [exportResult, setExportResult] = useState<ExportResult | null>(null)
 
   const registerFileInCache = useModStore((s) => s.registerFileInCache)
   const stringUrlCache      = useModStore((s) => s.stringUrlCache)
@@ -48,9 +50,13 @@ export default function WorkspaceHeader({
 
     setIsExporting(true)
     try {
-      await exportItemMod(project)
+      const filename = await exportItemMod(project)
+      // Success instructions can be permanently dismissed; errors always show.
+      if (!localStorage.getItem(HIDE_EXPORT_INSTRUCTIONS_KEY)) {
+        setExportResult({ status: 'success', filename })
+      }
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Export failed.')
+      setExportResult({ status: 'error', message: err instanceof Error ? err.message : 'Export failed.' })
     } finally {
       setIsExporting(false)
     }
@@ -246,6 +252,13 @@ export default function WorkspaceHeader({
           project={project}
           onProjectChange={onProjectChange}
           onClose={() => setTagsModalOpen(false)}
+        />
+      )}
+
+      {exportResult && (
+        <ExportResultModal
+          result={exportResult}
+          onClose={() => setExportResult(null)}
         />
       )}
     </header>

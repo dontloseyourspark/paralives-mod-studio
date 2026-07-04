@@ -1,8 +1,8 @@
 // src/components/CreateModWizard.tsx
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import {
   X, Armchair, ArrowRight, Check, CloudArrowUp,
-  Download, Sliders, Eye, File, PaintBucket, Translate
+  Sliders, File, PaintBucket, Translate
 } from 'phosphor-react'
 import { useModStore } from '../store/useModStore'
 import { assetDb } from '../utils/assetDb'
@@ -31,7 +31,6 @@ export interface TranslationWizardPayload {
 interface Props {
   isOpen: boolean
   onClose: () => void
-  onComplete?: (item: Item) => void
   onAdvancedEditing?: (partial: Partial<Item> | TranslationWizardPayload) => void
 }
 
@@ -39,25 +38,30 @@ interface Props {
 
 const MOD_TYPES = [
   {
-    id: 'wall_paint' as ModType,
-    label: 'Wall Paint',
-    description: 'Create a custom paint or wallpaper pattern for walls and surfaces.',
-    tags: ['Decoration', 'Color', 'Texture'],
-    icon: PaintBucket,
-  },
-  {
     id: 'furniture' as ModType,
     label: 'Furniture Item',
     description: 'Design a new piece of furniture for players to place in their builds.',
     tags: ['Object', 'Placeable', 'Build Mode'],
     icon: Armchair,
-  }, 
+    comingSoon: false,
+  },
   {
     id: 'translation' as ModType,
     label: 'Translation',
     description: 'Translate the game or a mod into a different language.',
     tags: ['Language', 'Text', 'Localization'],
     icon: Translate,
+    comingSoon: false,
+  },
+  {
+    // Surface mods aren't wired into the workspace yet (see CLAUDE.md roadmap) —
+    // shown disabled so newcomers aren't funneled into an item project by mistake.
+    id: 'wall_paint' as ModType,
+    label: 'Wall Paint',
+    description: 'Create a custom paint or wallpaper pattern for walls and surfaces.',
+    tags: ['Decoration', 'Color', 'Texture'],
+    icon: PaintBucket,
+    comingSoon: true,
   },
 ]
 
@@ -189,10 +193,7 @@ function DropZone({
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function CreateModWizard({ isOpen, onClose, onComplete, onAdvancedEditing }: Props) {
-/*   const currentProject = useModStore((s) => s.currentProject)
-  const updateProject = useModStore((s) => s.updateProject) */
-  const addItemWith = useModStore((s) => s.addItemWith)
+export default function CreateModWizard({ isOpen, onClose, onAdvancedEditing }: Props) {
   const registerFileInCache = useModStore((s) => s.registerFileInCache)
 
   const [step, setStep] = useState(0)
@@ -204,6 +205,21 @@ export default function CreateModWizard({ isOpen, onClose, onComplete, onAdvance
     textureFiles: [],
   })
 
+  // Declared before the early return so the Escape-key effect (which must also
+  // run before it, per the rules of hooks) can reference it.
+  const handleClose = useCallback(() => {
+    setStep(0)
+    setState({ modType: null, modName: '', language: '', meshFile: null, textureFiles: [] })
+    onClose()
+  }, [onClose])
+
+  useEffect(() => {
+    if (!isOpen) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') handleClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [isOpen, handleClose])
+
   if (!isOpen) return null
 
   // ── Navigation ─────────────────────────────────────────────────────────────
@@ -211,19 +227,13 @@ export default function CreateModWizard({ isOpen, onClose, onComplete, onAdvance
   const canAdvance = step === 0
     ? state.modType !== null
     : step === 1
-      ? state.modType === 'translation' 
-          ? state.language.trim().length > 0 
+      ? state.modType === 'translation'
+          ? state.language.trim().length > 0
           : state.modName.trim().length > 0
       : true
 
   const goNext = () => { if (canAdvance && step < 2) setStep((s) => s + 1) }
   const goBack = () => { if (step > 0) setStep((s) => s - 1) }
-
-  const handleClose = () => {
-    setStep(0)
-    setState({ modType: null, modName: '', language: '', meshFile: null, textureFiles: [] })
-    onClose()
-  }
 
   // ── Build item from wizard state ───────────────────────────────────────────
   //
@@ -300,33 +310,12 @@ export default function CreateModWizard({ isOpen, onClose, onComplete, onAdvance
   }
 
   // ── Finish actions ─────────────────────────────────────────────────────────
-
-  const handleDownload = async () => {
-    if (state.modType === 'translation') {
-      const translationText = "#Setting.Translations\n =Items\n"
-      const blob = new Blob([translationText], { type: 'text/plain' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `Translations.setting`
-      a.click()
-      URL.revokeObjectURL(url)
-      handleClose()
-      return
-    }
-
-    const item = await buildItem() as Item
-    addItemWith(item)
-    const blob = new Blob([JSON.stringify(item, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${item.name.replace(/\s+/g, '-').toLowerCase()}.mod.json`
-    a.click()
-    URL.revokeObjectURL(url)
-    onComplete?.(item)
-    handleClose()
-  }
+  //
+  // There used to be a "Download mod" button here that saved the raw internal
+  // item JSON as `{name}.mod.json` — NOT a game-loadable mod. New modders would
+  // drop it in their mods folder and conclude the tool was broken. The only real
+  // export is the workspace's Export Mod (itemModExporter), so the wizard now
+  // funnels everyone into the editor instead.
 
   const handleAdvancedEditing = async () => {
     if (state.modType === 'translation') {
@@ -370,22 +359,32 @@ export default function CreateModWizard({ isOpen, onClose, onComplete, onAdvance
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-1 gap-3">
-        {MOD_TYPES.map(({ id, label, description, tags, icon: Icon }) => {
+        {MOD_TYPES.map(({ id, label, description, tags, icon: Icon, comingSoon }) => {
           const selected = state.modType === id
           return (
             <button
               key={id}
-              onClick={() => setState((s) => ({ ...s, modType: id }))}
+              onClick={() => { if (!comingSoon) setState((s) => ({ ...s, modType: id })) }}
+              disabled={comingSoon}
               className={`
-                text-left p-5 rounded-2xl border-2 cursor-pointer transition-all duration-200 outline-none
-                ${selected
-                  ? 'border-[#8b5cf6] bg-[#8b5cf6]/8 shadow-lg shadow-[#8b5cf6]/10'
-                  : 'border-white/6 bg-white/2 hover:border-white/12 hover:bg-white/4'
+                text-left p-5 rounded-2xl border-2 transition-all duration-200 outline-none
+                ${comingSoon
+                  ? 'border-white/4 bg-white/1 opacity-50 cursor-not-allowed'
+                  : selected
+                    ? 'border-[#8b5cf6] bg-[#8b5cf6]/8 shadow-lg shadow-[#8b5cf6]/10 cursor-pointer'
+                    : 'border-white/6 bg-white/2 hover:border-white/12 hover:bg-white/4 cursor-pointer'
                 }
               `}
             >
-              <div className={`w-10 h-10 rounded-xl flex items-center justify-center mb-3 transition-colors ${selected ? 'bg-[#8b5cf6]/20' : 'bg-white/5'}`}>
-                <Icon size={20} weight="light" className={selected ? 'text-[#a78bfa]' : 'text-gray-400'} />
+              <div className="flex items-start justify-between">
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center mb-3 transition-colors ${selected ? 'bg-[#8b5cf6]/20' : 'bg-white/5'}`}>
+                  <Icon size={20} weight="light" className={selected ? 'text-[#a78bfa]' : 'text-gray-400'} />
+                </div>
+                {comingSoon && (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full border border-amber-500/30 text-amber-400/80 bg-amber-500/10 font-medium">
+                    Coming soon
+                  </span>
+                )}
               </div>
               <div className={`text-sm font-bold mb-1 transition-colors ${selected ? 'text-white' : 'text-gray-200'}`}>{label}</div>
               <div className="text-[12px] text-gray-500 leading-relaxed mb-3">{description}</div>
@@ -462,24 +461,39 @@ export default function CreateModWizard({ isOpen, onClose, onComplete, onAdvance
             />
           </div>
 
-          <DropZone
-            label="3D Mesh"
-            hint="Drop your .obj, .fbx, .glb, or .gltf file here"
-            accept=".obj,.fbx,.glb,.gltf"
-            files={state.meshFile ? [state.meshFile] : []}
-            icon={CloudArrowUp}
-            onFiles={([f]) => setState((s) => ({ ...s, meshFile: f ?? null }))}
-          />
+          <div className="flex flex-col gap-1.5">
+            <DropZone
+              label="3D Mesh"
+              hint="Drop your .fbx file here"
+              accept=".fbx"
+              files={state.meshFile ? [state.meshFile] : []}
+              icon={CloudArrowUp}
+              onFiles={([f]) => setState((s) => ({ ...s, meshFile: f ?? null }))}
+            />
+            <p className="text-[11px] text-gray-600 leading-relaxed m-0 px-1">
+              Paralives uses FBX meshes. Exporting from Blender? Use{' '}
+              <span className="text-gray-400 font-medium">Forward: Z Forward</span> and{' '}
+              <span className="text-gray-400 font-medium">Up: Y Up</span> in the FBX export settings.
+              You can also add or replace the mesh later in the editor.
+            </p>
+          </div>
 
-          <DropZone
-            label="Textures"
-            hint="Drop texture images here (PNG, JPG, TGA…)"
-            accept=".png,.jpg,.jpeg,.tga,.webp"
-            multiple
-            files={state.textureFiles}
-            icon={CloudArrowUp}
-            onFiles={(files) => setState((s) => ({ ...s, textureFiles: files }))}
-          />
+          <div className="flex flex-col gap-1.5">
+            <DropZone
+              label="Textures"
+              hint="Drop texture images here (PNG recommended)"
+              accept=".png,.jpg,.jpeg,.tga,.webp"
+              multiple
+              files={state.textureFiles}
+              icon={CloudArrowUp}
+              onFiles={(files) => setState((s) => ({ ...s, textureFiles: files }))}
+            />
+            <p className="text-[11px] text-gray-600 leading-relaxed m-0 px-1">
+              The first image becomes the <span className="text-gray-400 font-medium">Detail Map</span>{' '}
+              (your item's main texture); the second becomes the Color Zone Map. You can reassign
+              slots later in the Textures tab.
+            </p>
+          </div>
         </div>
       </div>
     )
@@ -533,21 +547,16 @@ export default function CreateModWizard({ isOpen, onClose, onComplete, onAdvance
     return (
       <div className="flex flex-col gap-6 animate-in fade-in slide-in-from-bottom-3 duration-200">
         <div className="text-center">
-          <h2 className="text-2xl font-bold text-white m-0">Preview &amp; export</h2>
-          <p className="text-sm text-gray-500 mt-2 m-0">Review your mod before downloading or editing further.</p>
-        </div>
-
-        <div className="w-full h-48 rounded-2xl border border-white/6 bg-white/2 flex flex-col items-center justify-center gap-2">
-          <Eye size={28} className="text-gray-600" weight="light" />
-          <span className="text-xs text-gray-600">3D preview not available in browser</span>
+          <h2 className="text-2xl font-bold text-white m-0">Ready to build</h2>
+          <p className="text-sm text-gray-500 mt-2 m-0">Check the summary, then open your new item in the editor.</p>
         </div>
 
         <div className="rounded-2xl border border-white/6 bg-white/2 overflow-hidden">
           {[
             ['Mod name', state.modName.trim() || '—'],
             ['Type', selectedType?.label ?? '—'],
-            ['Mesh', state.meshFile?.name ?? 'None'],
-            ['Textures', state.textureFiles.length > 0 ? `${state.textureFiles.length} file${state.textureFiles.length > 1 ? 's' : ''}` : 'None'],
+            ['Mesh', state.meshFile?.name ?? 'None (add one in the editor)'],
+            ['Textures', state.textureFiles.length > 0 ? `${state.textureFiles.length} file${state.textureFiles.length > 1 ? 's' : ''}` : 'None (add them in the editor)'],
           ].map(([key, val], i, arr) => (
             <div
               key={key}
@@ -559,22 +568,18 @@ export default function CreateModWizard({ isOpen, onClose, onComplete, onAdvance
           ))}
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <button
-            onClick={handleDownload}
-            className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-white/5 hover:bg-white/8 border border-white/8 hover:border-white/14 text-sm font-semibold text-gray-300 hover:text-white cursor-pointer transition-all duration-150 outline-none"
-          >
-            <Download size={15} weight="bold" />
-            Download mod
-          </button>
-          <button
-            onClick={handleAdvancedEditing}
-            className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-[#8b5cf6] hover:bg-[#7c3aed] text-sm font-semibold text-white cursor-pointer transition-all duration-150 outline-none border-none shadow-lg shadow-[#8b5cf6]/20"
-          >
-            <Sliders size={15} weight="bold" />
-            Advanced editing
-          </button>
-        </div>
+        <p className="text-[12px] text-gray-500 leading-relaxed m-0 text-center">
+          Next you'll see your mesh in the 3D viewport, where you can preview textures, tweak
+          properties, and export the finished <span className="text-gray-400 font-mono text-[11px]">.mod</span> when you're ready.
+        </p>
+
+        <button
+          onClick={handleAdvancedEditing}
+          className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-[#8b5cf6] hover:bg-[#7c3aed] text-sm font-semibold text-white cursor-pointer transition-all duration-150 outline-none border-none shadow-lg shadow-[#8b5cf6]/20"
+        >
+          <Sliders size={15} weight="bold" />
+          Open in Editor
+        </button>
       </div>
     )
   }

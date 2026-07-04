@@ -5,6 +5,7 @@ import {
   Palette, UploadSimple, X, CheckCircle, Warning, TreeStructure, Copy, Info
 } from 'phosphor-react'
 import { useModStore } from '../store/useModStore'
+import { validateItem } from '../lib/itemValidation'
 import { ITEM_MESH_TEXTURE_SLOTS, SLOT_LABELS, CONFIRMED_SLOTS, itemTextureCacheKey } from '../lib/itemTextureSlots'
 import type { ItemMeshTextureSlot } from '../lib/itemTextureSlots'
 import type { Item, ComponentNode, PrefabPropertyValue } from '../types/types'
@@ -823,6 +824,32 @@ export default function ItemEditorPanel({ item, activeNode, onSave, onClearNode,
         </div>
 
         <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-4 min-h-0">
+
+          {/* Export-readiness banner — the actionable counterpart to the left
+              panel's status ring. Only rendered when validateItem finds issues,
+              so a clean item pays no visual cost. */}
+          {(() => {
+            const validation = validateItem(item)
+            if (validation.status === 'ready') return null
+            const isError = validation.status === 'error'
+            return (
+              <div className={`flex items-start gap-2.5 px-4 py-3 rounded-2xl border shrink-0 ${
+                isError ? 'bg-rose-500/5 border-rose-500/15' : 'bg-amber-500/5 border-amber-500/15'
+              }`}>
+                <Warning size={14} weight="fill" className={`shrink-0 mt-0.5 ${isError ? 'text-rose-400/80' : 'text-amber-400/80'}`} />
+                <div className="flex flex-col gap-1 min-w-0">
+                  <span className={`text-[11px] font-semibold ${isError ? 'text-rose-300' : 'text-amber-300'}`}>
+                    {isError ? 'This item can’t export correctly yet' : 'Worth checking before you export'}
+                  </span>
+                  <ul className="m-0 pl-0 list-none flex flex-col gap-0.5">
+                    {validation.issues.map((issue) => (
+                      <li key={issue} className="text-[11px] text-gray-500 leading-relaxed">• {issue}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            )
+          })()}
 
           {level0Tab === 'basic' ? (
             <>

@@ -33,7 +33,8 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (!toast) return
-    const timer = window.setTimeout(() => setToast(null), 3000)
+    // Errors carry a full sentence plus a recovery hint — give them time to read.
+    const timer = window.setTimeout(() => setToast(null), toast.type === 'error' ? 8000 : 3000)
     return () => window.clearTimeout(timer)
   }, [toast])
 
@@ -95,13 +96,6 @@ export default function Dashboard() {
     navigate(`/project/${project.id}`)
   }
 
-  const handleWizardComplete = (item: Item) => {
-    const project = createProject()
-    addItemWith(item)
-    setWizardOpen(false)
-    navigate(`/project/${project.id}`)
-  }
-
   const handleOpenMod = () => {
     fileInputRef.current?.click()
   }
@@ -146,9 +140,12 @@ export default function Dashboard() {
         <span>Only limited mod types are supported at this moment. Other mod-focused features will be added soon.</span>
       </section>
 
-      {/* Primary Actions */}
-      <section>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {/* Primary actions — create, or open/import an existing mod. The "Open
+          Existing Mod" card and the dropzone below are the same import pipeline
+          (ModImporter); they're grouped in one section so newcomers don't have
+          to guess the difference between "opening" and "importing". */}
+      <section className="flex flex-col gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <DashboardCard
             icon={<Plus size={24} weight="bold" className="text-[#8b5cf6]" />}
             text="Create New Mod"
@@ -158,16 +155,15 @@ export default function Dashboard() {
           <DashboardCard
             icon={<Folder size={24} weight="bold" className="text-gray-400" />}
             text="Open Existing Mod"
-            description="Browse and open a saved mod file"
+            description="Open a .mod folder you exported earlier or downloaded"
             onClick={handleOpenMod}
           />
         </div>
-      </section>
-
-      {/* Import */}
-      <section className="flex flex-col gap-4">
-        <h2 className="text-lg font-semibold tracking-tight text-gray-300 m-0">Import External Mod Package</h2>
-        <ModImporter onImportComplete={handleImportComplete} triggerRef={fileInputRef} />
+        <ModImporter
+          onImportComplete={handleImportComplete}
+          onError={(message) => setToast({ message, type: 'error' })}
+          triggerRef={fileInputRef}
+        />
       </section>
 
       {/* Recent Projects */}
@@ -366,7 +362,6 @@ export default function Dashboard() {
       <CreateModWizard
         isOpen={wizardOpen}
         onClose={() => setWizardOpen(false)}
-        onComplete={handleWizardComplete}
         onAdvancedEditing={handleWizardAdvanced}
       />
     </div>

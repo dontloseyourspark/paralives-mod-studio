@@ -9,6 +9,9 @@ import type { ModProject, TranslationData, ComponentNode, ModType, PrefabPropert
 
 interface ModImporterProps {
   onImportComplete: (project: ModProject) => void
+  // Import failures are surfaced through here (the host page renders them as a
+  // toast). Falls back to alert() if not provided.
+  onError?: (message: string) => void
   triggerRef?: React.RefObject<HTMLInputElement | null>
 }
 
@@ -55,9 +58,28 @@ interface RawItemMeta {
   overrideNestedPrefabToSpawn?: boolean
 }
 
-export default function ModImporter({ onImportComplete, triggerRef }: ModImporterProps) {
+export default function ModImporter({ onImportComplete, onError, triggerRef }: ModImporterProps) {
   const [isDragging, setIsDragging] = useState(false)
+  const [isImporting, setIsImporting] = useState(false)
   const registerFileInCache = useModStore((state) => state.registerFileInCache)
+
+  // Wraps processFiles so that ANY failure (corrupt zip, unexpected file
+  // structure, quota errors while persisting assets…) reaches the user instead
+  // of dying as a silent unhandled rejection, and so the dropzone shows a
+  // busy state while large mods are being unpacked and persisted.
+  const runImport = async (fileList: FileList | File[]) => {
+    if (isImporting) return
+    setIsImporting(true)
+    try {
+      await processFiles(fileList)
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err)
+      const report = onError ?? window.alert
+      report(`Import failed: ${detail} — make sure you're importing a Paralives .mod folder, or a .zip/.mod archive of one.`)
+    } finally {
+      setIsImporting(false)
+    }
+  }
 
   const processFiles = async (fileList: FileList | File[]) => {
 
@@ -230,8 +252,9 @@ export default function ModImporter({ onImportComplete, triggerRef }: ModImporte
     }
 
     if (!itemsSettingContent && !translationsSettingContent) {
-      alert('Could not locate Items.setting or Translations.setting.')
-      return
+      // Thrown (not alerted) so runImport's catch adds the recovery hint and
+      // clears the busy state.
+      throw new Error("this doesn't look like a Paralives mod (no Items.setting or Translations.setting inside)")
     }
 
     const originalZipBlob = isArchive
@@ -718,12 +741,12 @@ export default function ModImporter({ onImportComplete, triggerRef }: ModImporte
 
   return (
     <div
-      onDragOver={(e) => { e.preventDefault(); setIsDragging(true) }}
+      onDragOver={(e) => { e.preventDefault(); if (!isImporting) setIsDragging(true) }}
       onDragLeave={() => setIsDragging(false)}
       onDrop={(e) => {
         e.preventDefault()
         setIsDragging(false)
-        if (e.dataTransfer.files) processFiles(e.dataTransfer.files)
+        if (e.dataTransfer.files && !isImporting) runImport(e.dataTransfer.files)
       }}
       className={`border-2 border-dashed rounded-2xl p-12 flex flex-col items-center justify-center gap-4 transition-all duration-150 text-center select-none ${
         isDragging
@@ -731,18 +754,30 @@ export default function ModImporter({ onImportComplete, triggerRef }: ModImporte
           : 'border-white/10 bg-[#161923] text-gray-400 hover:border-white/20'
       }`}
     >
-      <div className="p-4 bg-white/2 rounded-full text-gray-300">
-        <Folder size={32} weight="duotone" className={isDragging ? 'text-[#8b5cf6]' : ''} />
-      </div>
-      <div className="flex flex-col gap-1">
-        <p className="text-sm font-semibold text-white">Drag and drop your .mod or .zip file here</p>
-        <p className="text-xs text-gray-500 max-w-xs">Your browser will automatically extract the internal definitions.</p>
-      </div>
-      <label className="flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-white/5 hover:bg-white/10 rounded-xl cursor-pointer transition-colors mt-2">
-        <UploadSimple size={14} weight="bold" />
-        <span>Select Folder</span>
-        <input ref={triggerRef} type="file" className="hidden" multiple onChange={(e) => e.target.files && processFiles(e.target.files)} {...directoryAttributes} />
-      </label>
+      {isImporting ? (
+        <>
+          <div className="w-8 h-8 border-2 border-gray-600 border-t-[#8b5cf6] rounded-full animate-spin" />
+          <div className="flex flex-col gap-1">
+            <p className="text-sm font-semibold text-white">Importing mod…</p>
+            <p className="text-xs text-gray-500 max-w-xs">Unpacking meshes, textures, and settings. Large mods can take a few seconds.</p>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="p-4 bg-white/2 rounded-full text-gray-300">
+            <Folder size={32} weight="duotone" className={isDragging ? 'text-[#8b5cf6]' : ''} />
+          </div>
+          <div className="flex flex-col gap-1">
+            <p className="text-sm font-semibold text-white">Drag and drop your .mod or .zip file here</p>
+            <p className="text-xs text-gray-500 max-w-xs">Your browser will automatically extract the internal definitions.</p>
+          </div>
+          <label className="flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-white/5 hover:bg-white/10 rounded-xl cursor-pointer transition-colors mt-2">
+            <UploadSimple size={14} weight="bold" />
+            <span>Select Folder</span>
+            <input ref={triggerRef} type="file" className="hidden" multiple onChange={(e) => e.target.files && runImport(e.target.files)} {...directoryAttributes} />
+          </label>
+        </>
+      )}
     </div>
   )
 }

@@ -189,7 +189,7 @@ function generateItemObjectRootSetting(items: Item[], modGuid: string): string {
   return lines.join('')
 }
 
-async function exportFromScratch(project: ModProject): Promise<void> {
+async function exportFromScratch(project: ModProject): Promise<string> {
   const modGuid = deriveModGuid(project)
   const stem = modStem(project)
   const folder = `${stem}_${modGuid}.mod`
@@ -341,12 +341,16 @@ async function exportFromScratch(project: ModProject): Promise<void> {
 
   // ── Download ───────────────────────────────────────────────────────────────
   const blob = await zip.generateAsync({ type: 'blob' })
-  triggerDownload(blob, `${stem}_${modGuid}.mod.zip`)
+  const filename = `${stem}_${modGuid}.mod.zip`
+  triggerDownload(blob, filename)
+  return filename
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-export async function exportItemMod(project: ModProject): Promise<void> {
+// Returns the downloaded filename so the caller can surface it in the
+// post-export install instructions (ExportResultModal).
+export async function exportItemMod(project: ModProject): Promise<string> {
   const originalZipBlob = await assetDb.getFile(`original_zip_${project.id}`)
 
   if (originalZipBlob) {
@@ -367,10 +371,11 @@ export async function exportItemMod(project: ModProject): Promise<void> {
     }
 
     const blob = await zip.generateAsync({ type: 'blob' })
-    triggerDownload(blob, `${project.name.replace(/\s+/g, '_')}.mod.zip`)
-    return
+    const filename = `${project.name.replace(/\s+/g, '_')}.mod.zip`
+    triggerDownload(blob, filename)
+    return filename
   }
 
   // ── Generate-from-scratch path (Studio-created mods) ──────────────────────
-  await exportFromScratch(project)
+  return exportFromScratch(project)
 }
