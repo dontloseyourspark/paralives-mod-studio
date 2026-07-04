@@ -134,7 +134,13 @@ export const assetDb = {
   // NOTE: localStorage fallback will QuotaExceededError for full-res textures
   // (typically >5MB). IDB is the primary store. Users on a broken-IDB profile
   // may need to re-upload textures after refresh — acceptable for v1.
-  async saveFileRaw(key: string, file: File | Blob): Promise<void> {
+  // Returns true if the bytes were persisted to *some* backend (IDB or the
+  // localStorage fallback), false if both failed. Callers that need the asset to
+  // be retrievable afterwards (e.g. importing a mesh, where the viewport reads it
+  // back immediately) should check this instead of assuming success — a large
+  // file on a broken-IDB profile can exceed the ~5MB localStorage cap and land
+  // nowhere.
+  async saveFileRaw(key: string, file: File | Blob): Promise<boolean> {
     try {
       const dataUrl = await readFileAsDataUrl(file)
 
@@ -148,20 +154,23 @@ export const assetDb = {
           tx.onabort = () => { db.close(); reject(tx.error) }
           tx.objectStore(STORE_NAME).put(dataUrl, key)
         })
-        return
+        return true
       } catch {
         console.warn(`[assetDb] IndexedDB write failed for ${key} (raw). Trying localStorage fallback...`)
       }
 
-      // ATTEMPT 2: localStorage fallback — will likely fail for large textures
+      // ATTEMPT 2: localStorage fallback — will likely fail for large files
       try {
         localStorage.setItem(`asset_fallback_${key}`, dataUrl)
+        return true
       } catch (lsError) {
         console.warn(`[assetDb] localStorage fallback failed for ${key} (likely too large):`, lsError)
+        return false
       }
 
     } catch (error) {
       console.error(`[assetDb] Total save failure for ${key} (raw):`, error)
+      return false
     }
   },
 

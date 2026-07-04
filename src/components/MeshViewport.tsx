@@ -146,11 +146,21 @@ export function MeshViewport({ meshKeys, activeNode, item, onSave }: MeshViewpor
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef    = useRef<HTMLCanvasElement>(null)
   const importInputRef = useRef<HTMLInputElement>(null)
+  const [importError, setImportError] = useState<string | null>(null)
+  const [importing, setImporting] = useState(false)
 
   const handleImportMesh = async (file: File) => {
     if (!item || !activeNode || !onSave) return
-    const { importMeshForNode } = await import('../lib/meshImport')
-    onSave(await importMeshForNode(item, activeNode, file))
+    setImportError(null)
+    setImporting(true)
+    try {
+      const { importMeshForNode } = await import('../lib/meshImport')
+      onSave(await importMeshForNode(item, activeNode, file))
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'Could not import this mesh.')
+    } finally {
+      setImporting(false)
+    }
   }
 
   // Cleanup function stored in a ref so it's always current
@@ -710,12 +720,16 @@ export function MeshViewport({ meshKeys, activeNode, item, onSave }: MeshViewpor
               <>
                 <button
                   onClick={() => importInputRef.current?.click()}
-                  className="mt-1 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-gray-300 bg-white/5 hover:bg-[#8b5cf6]/20 hover:text-[#a78bfa] transition-colors outline-none"
+                  disabled={importing}
+                  className="mt-1 px-3 py-1.5 rounded-lg text-[11px] font-semibold text-gray-300 bg-white/5 hover:bg-[#8b5cf6]/20 hover:text-[#a78bfa] transition-colors outline-none disabled:opacity-50"
                 >
-                  Import Mesh…
+                  {importing ? 'Importing…' : 'Import Mesh…'}
                 </button>
                 <input ref={importInputRef} type="file" accept=".fbx" className="hidden"
                   onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImportMesh(f); e.target.value = '' }} />
+                {importError && (
+                  <p className="mt-1 max-w-[240px] text-center text-[10px] text-rose-400/80 leading-relaxed">{importError}</p>
+                )}
               </>
             )}
           </div>

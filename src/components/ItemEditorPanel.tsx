@@ -497,34 +497,50 @@ interface AssetMeshRowProps {
 function AssetMeshRow({ item, node, value, onSave }: AssetMeshRowProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const strVal = value != null ? String(value) : null
+  const [importError, setImportError] = useState<string | null>(null)
+  const [importing, setImporting] = useState(false)
 
   const handleImport = async (file: File) => {
-    const { importMeshForNode } = await import('../lib/meshImport')
-    onSave(await importMeshForNode(item, node, file))
+    setImportError(null)
+    setImporting(true)
+    try {
+      const { importMeshForNode } = await import('../lib/meshImport')
+      onSave(await importMeshForNode(item, node, file))
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'Could not import this mesh.')
+    } finally {
+      setImporting(false)
+    }
   }
 
   return (
-    <div className="flex items-center justify-between gap-3 py-1.5 border-b border-white/3">
-      <span className="text-[11px] text-gray-400 shrink-0 font-medium">Asset Mesh</span>
-      <div className="flex items-center gap-1.5 min-w-0">
-        {strVal && (
-          <>
-            <span className="text-[10px] font-mono text-gray-500 truncate">{strVal}</span>
-            <button onClick={() => navigator.clipboard.writeText(strVal)} className="text-gray-600 hover:text-gray-300 transition-colors shrink-0" title="Copy GUID">
-              <Copy size={10} />
-            </button>
-          </>
-        )}
-        <button
-          onClick={() => inputRef.current?.click()}
-          className="shrink-0 flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-semibold text-gray-500 hover:text-[#a78bfa] hover:bg-[#8b5cf6]/10 rounded transition-colors"
-        >
-          <UploadSimple size={10} />
-          {strVal ? 'Replace' : 'Import'}
-        </button>
-        <input ref={inputRef} type="file" accept=".fbx" className="hidden"
-          onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImport(f); e.target.value = '' }} />
+    <div className="flex flex-col gap-1 py-1.5 border-b border-white/3">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-[11px] text-gray-400 shrink-0 font-medium">Asset Mesh</span>
+        <div className="flex items-center gap-1.5 min-w-0">
+          {strVal && (
+            <>
+              <span className="text-[10px] font-mono text-gray-500 truncate">{strVal}</span>
+              <button onClick={() => navigator.clipboard.writeText(strVal)} className="text-gray-600 hover:text-gray-300 transition-colors shrink-0" title="Copy GUID">
+                <Copy size={10} />
+              </button>
+            </>
+          )}
+          <button
+            onClick={() => inputRef.current?.click()}
+            disabled={importing}
+            className="shrink-0 flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-semibold text-gray-500 hover:text-[#a78bfa] hover:bg-[#8b5cf6]/10 rounded transition-colors disabled:opacity-50"
+          >
+            <UploadSimple size={10} />
+            {importing ? 'Importing…' : strVal ? 'Replace' : 'Import'}
+          </button>
+          <input ref={inputRef} type="file" accept=".fbx" className="hidden"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImport(f); e.target.value = '' }} />
+        </div>
       </div>
+      {importError && (
+        <p className="text-[10px] text-rose-400/80 leading-relaxed m-0">{importError}</p>
+      )}
     </div>
   )
 }

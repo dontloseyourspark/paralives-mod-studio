@@ -77,17 +77,12 @@ export default function Dashboard() {
       const partial = payload as Partial<Item>
       const hasContent = partial.name && partial.name !== 'New Mod Item'
       if (hasContent) {
-        const newItem = makeDefaultItem({
-          id:   partial.id   ?? crypto.randomUUID(),
-          guid: partial.guid ?? crypto.randomUUID(),
-          name: partial.name ?? 'New Mod Item',
-          description: partial.description ?? '',
-          price: partial.price ?? 0,
-          thumbnailKey: partial.thumbnailKey ?? null,
-          textureKeys:  partial.textureKeys  ?? {},
-          componentBlueprints: partial.componentBlueprints ?? { rootDefaultStates: [], materialSurfaces: [] },
-          components: partial.components ?? [],
-        })
+        // Spread the whole partial over the defaults rather than hand-listing
+        // fields — cherry-picking previously dropped `meshKeys` (and prefabGuid/
+        // tags), which left a wizard-uploaded mesh unresolvable in the viewport
+        // (the components referenced an AssetMesh GUID with no meshKeys entry
+        // mapping it to the stored blob). makeDefaultItem fills any gaps.
+        const newItem = makeDefaultItem(partial)
         addItemWith(newItem)
       }
     }
